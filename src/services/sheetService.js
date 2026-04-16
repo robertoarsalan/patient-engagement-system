@@ -108,10 +108,8 @@ async function getSettings() {
 }
 
 /**
- * CRITICAL FIX:
- * This preserves existing formulas and values in the row.
- * It reads the current row using FORMULA mode, merges updates,
- * then writes the merged row back.
+ * SAFE ROW UPDATE:
+ * Preserves formulas and existing row values.
  */
 async function updateRow(rowNumber, updates) {
   const sheets = getSheetsClient();
@@ -206,11 +204,10 @@ function getReminderMinutes(counter, settings) {
 }
 
 /**
- * Used when operator clicks "Send Message"
- * Fixes:
- * - updates status automatically
+ * SEND MESSAGE CLICK:
+ * - marks patient as contacted
  * - schedules next reminder
- * - clears telegram lock so next reminder can fire
+ * - clears telegram lock for future reminders
  */
 async function markSent(patient, headers, settings, finalMessage) {
   const statusKey = findHeader(headers, "status");
@@ -221,6 +218,7 @@ async function markSent(patient, headers, settings, finalMessage) {
   const followKey = findHeader(headers, "next_followup_at");
   const lastAgentKey = findHeader(headers, "last_agent_message_at");
   const finalKey = findHeader(headers, "last_final_message");
+  const generatedKey = findHeader(headers, "last_generated_message");
   const stalledKey = findHeader(headers, "stalled_task_counter");
   const countKey = findHeader(headers, "message_count");
   const alertKey = findHeader(headers, "telegram_last");
@@ -231,7 +229,6 @@ async function markSent(patient, headers, settings, finalMessage) {
 
   const count = Number(patient[countKey] || 0);
   const stalled = Number(patient[stalledKey] || 0) + 1;
-
   const minutes = getReminderMinutes(stalled, settings);
   const currentTime = now();
   const nextDate = addMinutes(currentTime, minutes);
@@ -244,6 +241,7 @@ async function markSent(patient, headers, settings, finalMessage) {
     [actionKey]: "wait_patient_reply",
     [followKey]: formatDate(nextDate),
     [lastAgentKey]: formatDate(currentTime),
+    [generatedKey]: patient[generatedKey] || "",
     [finalKey]: finalMessage,
     [stalledKey]: String(stalled),
     [countKey]: String(count + 1),
@@ -273,7 +271,14 @@ async function markSent(patient, headers, settings, finalMessage) {
     reason: "message_marked_sent"
   });
 
-  console.log(`Message marked sent for row ${patient.rowNumber}. Next follow-up in ${minutes} minutes.`);
+  console.log(
+    `Message marked sent for row ${patient.rowNumber}. Next follow-up in ${minutes} minutes.`
+  );
+
+  return {
+    nextFollowupAt: formatDate(nextDate),
+    minutes
+  };
 }
 
 module.exports = {
@@ -288,5 +293,6 @@ module.exports = {
   toBool,
   findHeader,
   formatDate,
-  addMinutes
+  addMinutes,
+  getReminderMinutes
 };

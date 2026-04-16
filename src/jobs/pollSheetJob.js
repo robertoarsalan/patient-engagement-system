@@ -1,7 +1,6 @@
 const { checkNewPatients } = require("../services/triggerService");
 const {
   getSheetData,
-  getSettings,
   isDue,
   hasValue,
   toBool,
@@ -21,6 +20,7 @@ async function checkDueTasks() {
   const alertKey = findHeader(headers, "telegram_last");
   const generatedKey = findHeader(headers, "last_generated_message");
   const finalKey = findHeader(headers, "last_final_message");
+  const updatedAtKey = findHeader(headers, "updated_at");
 
   console.log("Checking sheet for due tasks...");
 
@@ -31,21 +31,10 @@ async function checkDueTasks() {
     const nextFollowupAt = patient[followupKey];
     const telegramLastAlertId = patient[alertKey];
 
-    if (!currentTaskActive) {
-      continue;
-    }
-
-    if (!hasValue(nextFollowupAt)) {
-      continue;
-    }
-
-    if (!isDue(nextFollowupAt)) {
-      continue;
-    }
-
-    if (hasValue(telegramLastAlertId)) {
-      continue;
-    }
+    if (!currentTaskActive) continue;
+    if (!hasValue(nextFollowupAt)) continue;
+    if (!isDue(nextFollowupAt)) continue;
+    if (hasValue(telegramLastAlertId)) continue;
 
     dueCount++;
 
@@ -55,13 +44,19 @@ async function checkDueTasks() {
 
     await updateRow(patient.rowNumber, {
       [generatedKey]: aiResult.generatedMessage,
-      [finalKey]: aiResult.finalMessage
+      [finalKey]: aiResult.finalMessage,
+      [updatedAtKey]: new Date().toISOString().replace("T", " ").slice(0, 19)
     });
 
-    const telegramMessage = await sendPatientTaskCard(patient.rowNumber, patient, aiResult.finalMessage);
+    const telegramMessage = await sendPatientTaskCard(
+      patient.rowNumber,
+      { ...patient, [finalKey]: aiResult.finalMessage },
+      aiResult.finalMessage
+    );
 
     await updateRow(patient.rowNumber, {
-      [alertKey]: String(telegramMessage.message_id || "")
+      [alertKey]: String(telegramMessage.message_id || ""),
+      [updatedAtKey]: new Date().toISOString().replace("T", " ").slice(0, 19)
     });
 
     console.log(`Telegram task sent for row ${patient.rowNumber}`);
@@ -73,10 +68,7 @@ async function checkDueTasks() {
 }
 
 async function runPollingCycle() {
-  if (isRunning) {
-    return;
-  }
-
+  if (isRunning) return;
   isRunning = true;
 
   try {
