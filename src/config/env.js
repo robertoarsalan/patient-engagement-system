@@ -22,4 +22,5 @@ module.exports = {
 
   OPENAI_MODEL: requireEnv("OPENAI_MODEL", "gpt-5.4-mini"),
   ANTHROPIC_MODEL: requireEnv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+TIMEZONE=Europe/Istanbul
 };
