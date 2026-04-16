@@ -41,10 +41,21 @@ function now() {
   return new Date();
 }
 
+function parseSheetDateTime(datetime) {
+  if (!datetime) return null;
+
+  const raw = String(datetime).trim();
+  if (!raw) return null;
+
+  const normalized = raw.replace(" ", "T");
+  const d = new Date(normalized);
+  if (Number.isNaN(d.getTime())) return null;
+  return d;
+}
+
 function isDue(datetime) {
-  if (!datetime) return false;
-  const d = new Date(String(datetime).replace(" ", "T"));
-  if (Number.isNaN(d.getTime())) return false;
+  const d = parseSheetDateTime(datetime);
+  if (!d) return false;
   return d.getTime() <= Date.now();
 }
 
@@ -253,10 +264,6 @@ async function markSent(patient, headers, settings, finalMessage) {
     reason: "message_marked_sent"
   });
 
-  console.log(
-    `Message marked sent for row ${patient.rowNumber}. Next follow-up in ${minutes} minutes.`
-  );
-
   return {
     nextFollowupAt: formatDate(nextDate),
     minutes
@@ -276,5 +283,6 @@ module.exports = {
   findHeader,
   formatDate,
   addMinutes,
-  getReminderMinutes
+  getReminderMinutes,
+  parseSheetDateTime
 };

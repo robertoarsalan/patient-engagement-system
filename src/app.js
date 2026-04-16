@@ -123,7 +123,6 @@ app.post("/telegram-webhook", async (req, res) => {
 ⏰ Next reminder: ${result.nextFollowupAt} (TR time)`
         );
 
-        console.log(`Send Message completed for row ${rowNumber}`);
         return res.json({ ok: true });
       } catch (error) {
         console.error("Send Message action failed:", error.response?.data || error.message || error);
@@ -138,8 +137,6 @@ app.post("/telegram-webhook", async (req, res) => {
 
     if (action === "regen") {
       try {
-        console.log(`Processing Regenerate for row ${rowNumber}...`);
-
         const aiResult = await generatePatientMessage(patient);
 
         await updateRow(patient.rowNumber, {
@@ -174,11 +171,10 @@ app.post("/telegram-webhook", async (req, res) => {
 
     if (action === "done") {
       try {
-        console.log(`Processing Done for row ${rowNumber}...`);
-
         await updateRow(patient.rowNumber, {
           [currentTaskActiveKey]: "FALSE",
           [nextActionKey]: "done",
+          [nextFollowupAtKey]: "",
           [telegramLastAlertKey]: "",
           [statusKey]: patient[statusKey] || "contacted",
           [subStatusKey]: "done",
@@ -206,8 +202,6 @@ app.post("/telegram-webhook", async (req, res) => {
 
     if (action === "snooze15") {
       try {
-        console.log(`Processing Snooze 15m for row ${rowNumber}...`);
-
         const nextDate = new Date(Date.now() + 15 * 60 * 1000);
         const formatted = formatDate(nextDate);
 
@@ -239,8 +233,6 @@ app.post("/telegram-webhook", async (req, res) => {
 
     if (action === "hot") {
       try {
-        console.log(`Processing Hot Lead for row ${rowNumber}...`);
-
         const existingNotes = patient[notesKey] || "";
         const newNotes = existingNotes ? `${existingNotes} | HOT LEAD` : "HOT LEAD";
 
@@ -272,8 +264,6 @@ app.post("/telegram-webhook", async (req, res) => {
 
     if (action === "call") {
       try {
-        console.log(`Processing Call Patient for row ${rowNumber}...`);
-
         await answerCallbackQuery(callbackQueryId, "Call patient");
 
         await sendTelegramMessage(

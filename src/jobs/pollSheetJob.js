@@ -22,6 +22,7 @@ async function checkDueTasks() {
   const generatedKey = findHeader(headers, "last_generated_message");
   const finalKey = findHeader(headers, "last_final_message");
   const updatedAtKey = findHeader(headers, "updated_at");
+  const actionKey = findHeader(headers, "next_action");
 
   console.log("Checking sheet for due tasks...");
 
@@ -31,15 +32,17 @@ async function checkDueTasks() {
     const currentTaskActive = toBool(patient[activeKey]);
     const nextFollowupAt = patient[followupKey];
     const telegramLastAlertId = patient[alertKey];
+    const nextAction = String(patient[actionKey] || "").trim();
 
     if (!currentTaskActive) continue;
     if (!hasValue(nextFollowupAt)) continue;
     if (!isDue(nextFollowupAt)) continue;
     if (hasValue(telegramLastAlertId)) continue;
+    if (nextAction !== "wait_patient_reply") continue;
 
     dueCount++;
 
-    console.log(`Due task found for row ${patient.rowNumber} (${patient.patient_id || ""})`);
+    console.log(`Due follow-up found for row ${patient.rowNumber} (${patient.patient_id || ""})`);
 
     const aiResult = await generatePatientMessage(patient);
 
@@ -60,7 +63,7 @@ async function checkDueTasks() {
       [updatedAtKey]: formatDate(new Date())
     });
 
-    console.log(`Telegram task sent for row ${patient.rowNumber}`);
+    console.log(`Follow-up Telegram task sent for row ${patient.rowNumber}`);
   }
 
   if (dueCount === 0) {
