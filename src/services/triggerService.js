@@ -4,19 +4,12 @@ const {
   toBool,
   hasValue,
   findHeader,
-  updateRow
+  updateRow,
+  formatDate,
+  addMinutes
 } = require("./sheetService");
 const { generatePatientMessage } = require("./aiService");
 const { sendPatientTaskCard } = require("./telegramService");
-
-function formatDate(date) {
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
-}
-
-function addMinutes(date, minutes) {
-  return new Date(date.getTime() + minutes * 60000);
-}
 
 async function checkNewPatients() {
   const { headers, patients } = await getSheetData();
@@ -65,22 +58,13 @@ async function checkNewPatients() {
         }
       });
 
-      // Name-only trigger:
-      // if full_name exists and workflow has not started yet,
-      // system auto-fills everything and sends Telegram immediately.
-      if (!hasValue(fullName)) {
-        continue;
-      }
+      if (!hasValue(fullName)) continue;
+      if (workflowStarted) continue;
 
-      if (workflowStarted) {
-        continue;
-      }
+      const currentTime = new Date();
+      const nowStamp = formatDate(currentTime);
+      const nextFollowupAt = formatDate(addMinutes(currentTime, initialDelayMinutes));
 
-      const now = new Date();
-      const nowStamp = formatDate(now);
-      const nextFollowupAt = formatDate(addMinutes(now, initialDelayMinutes));
-
-      // Build a working patient object for AI generation
       const patientForAi = {
         ...patient,
         [statusKey]: "new_lead",
@@ -100,7 +84,6 @@ async function checkNewPatients() {
 
       const aiResult = await generatePatientMessage(patientForAi);
 
-      // Write all initial workflow fields automatically
       await updateRow(patient.rowNumber, {
         [triggerKey]: "TRUE",
         [photosKey]: nowStamp,

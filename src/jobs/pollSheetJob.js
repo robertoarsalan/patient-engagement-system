@@ -5,7 +5,8 @@ const {
   hasValue,
   toBool,
   findHeader,
-  updateRow
+  updateRow,
+  formatDate
 } = require("../services/sheetService");
 const { generatePatientMessage } = require("../services/aiService");
 const { sendPatientTaskCard } = require("../services/telegramService");
@@ -45,7 +46,7 @@ async function checkDueTasks() {
     await updateRow(patient.rowNumber, {
       [generatedKey]: aiResult.generatedMessage,
       [finalKey]: aiResult.finalMessage,
-      [updatedAtKey]: new Date().toISOString().replace("T", " ").slice(0, 19)
+      [updatedAtKey]: formatDate(new Date())
     });
 
     const telegramMessage = await sendPatientTaskCard(
@@ -56,7 +57,7 @@ async function checkDueTasks() {
 
     await updateRow(patient.rowNumber, {
       [alertKey]: String(telegramMessage.message_id || ""),
-      [updatedAtKey]: new Date().toISOString().replace("T", " ").slice(0, 19)
+      [updatedAtKey]: formatDate(new Date())
     });
 
     console.log(`Telegram task sent for row ${patient.rowNumber}`);

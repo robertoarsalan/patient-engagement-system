@@ -31,39 +31,6 @@ app.get("/health", (req, res) => {
   });
 });
 
-app.get("/sheet-test", async (req, res) => {
-  try {
-    const data = await getSheetData();
-    res.json({
-      ok: true,
-      totalPatients: data.patients.length,
-      firstPatient: data.patients[0] || null
-    });
-  } catch (error) {
-    console.error("Sheet test error:", error.message || error);
-    res.status(500).json({
-      ok: false,
-      error: error.message || String(error)
-    });
-  }
-});
-
-app.get("/telegram-test", async (req, res) => {
-  try {
-    const result = await sendTelegramMessage("✅ Telegram test from patient engagement backend");
-    res.json({
-      ok: true,
-      result
-    });
-  } catch (error) {
-    console.error("Telegram test error:", error.response?.data || error.message || error);
-    res.status(500).json({
-      ok: false,
-      error: error.response?.data || error.message || String(error)
-    });
-  }
-});
-
 app.get("/telegram-webhook", (req, res) => {
   res.json({
     ok: true,
@@ -125,7 +92,6 @@ app.post("/telegram-webhook", async (req, res) => {
         console.log(`Processing Send Message for row ${rowNumber}...`);
 
         const settings = await getSettings();
-
         let finalMessage = patient[lastFinalMessageKey] || "";
 
         if (!finalMessage) {
@@ -140,7 +106,7 @@ app.post("/telegram-webhook", async (req, res) => {
           finalMessage = aiResult.finalMessage;
         }
 
-        await markSent(patient, headers, settings, finalMessage);
+        const result = await markSent(patient, headers, settings, finalMessage);
 
         await answerCallbackQuery(callbackQueryId, "Message marked as sent");
 
@@ -154,7 +120,7 @@ app.post("/telegram-webhook", async (req, res) => {
 👤 ${patient.full_name || ""}
 📌 Status: ${refreshedPatient?.[statusKey] || "contacted"}
 📌 Sub-status: ${refreshedPatient?.[subStatusKey] || "waiting_reply"}
-⏰ Next reminder: ${refreshedPatient?.[nextFollowupAtKey] || "-"}`
+⏰ Next reminder: ${result.nextFollowupAt} (TR time)`
         );
 
         console.log(`Send Message completed for row ${rowNumber}`);
@@ -256,7 +222,7 @@ app.post("/telegram-webhook", async (req, res) => {
         await sendTelegramMessage(
           `⏳ Snoozed row ${rowNumber} for 15 minutes
 👤 ${patient.full_name || ""}
-⏰ New reminder: ${formatted}`
+⏰ New reminder: ${formatted} (TR time)`
         );
 
         return res.json({ ok: true });

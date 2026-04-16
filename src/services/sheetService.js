@@ -1,5 +1,6 @@
 const { google } = require("googleapis");
 const env = require("../config/env");
+const { formatDate, addMinutes } = require("../utils/time");
 
 const SHEET_NAME = "patients";
 const MESSAGE_LOG_SHEET = "message_log";
@@ -38,15 +39,6 @@ function hasValue(v) {
 
 function now() {
   return new Date();
-}
-
-function formatDate(date) {
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
-}
-
-function addMinutes(date, m) {
-  return new Date(date.getTime() + m * 60000);
 }
 
 function isDue(datetime) {
@@ -107,10 +99,6 @@ async function getSettings() {
   return map;
 }
 
-/**
- * SAFE ROW UPDATE:
- * Preserves formulas and existing row values.
- */
 async function updateRow(rowNumber, updates) {
   const sheets = getSheetsClient();
   const { headers } = await getSheetData();
@@ -203,12 +191,6 @@ function getReminderMinutes(counter, settings) {
   return reminder3;
 }
 
-/**
- * SEND MESSAGE CLICK:
- * - marks patient as contacted
- * - schedules next reminder
- * - clears telegram lock for future reminders
- */
 async function markSent(patient, headers, settings, finalMessage) {
   const statusKey = findHeader(headers, "status");
   const subKey = findHeader(headers, "sub_status");
