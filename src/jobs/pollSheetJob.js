@@ -1,0 +1,104 @@
+const { checkNewPatients } = require("../services/triggerService");
+const {
+  getSheetData,
+  getSettings,
+  isDue,
+  hasValue,
+  toBool,
+  findHeader,
+  updateRow
+} = require("../services/sheetService");
+const { generatePatientMessage } = require("../services/aiService");
+const { sendPatientTaskCard } = require("../services/telegramService");
+
+let isRunning = false;
+
+async function checkDueTasks() {
+  const { headers, patients } = await getSheetData();
+
+  const activeKey = findHeader(headers, "current_task_active");
+  const followupKey = findHeader(headers, "next_followup_at");
+  const alertKey = findHeader(headers, "telegram_last");
+  const generatedKey = findHeader(headers, "last_generated_message");
+  const finalKey = findHeader(headers, "last_final_message");
+
+  console.log("Checking sheet for due tasks...");
+
+  let dueCount = 0;
+
+  for (const patient of patients) {
+    const currentTaskActive = toBool(patient[activeKey]);
+    const nextFollowupAt = patient[followupKey];
+    const telegramLastAlertId = patient[alertKey];
+
+    if (!currentTaskActive) {
+      continue;
+    }
+
+    if (!hasValue(nextFollowupAt)) {
+      continue;
+    }
+
+    if (!isDue(nextFollowupAt)) {
+      continue;
+    }
+
+    if (hasValue(telegramLastAlertId)) {
+      continue;
+    }
+
+    dueCount++;
+
+    console.log(`Due task found for row ${patient.rowNumber} (${patient.patient_id || ""})`);
+
+    const aiResult = await generatePatientMessage(patient);
+
+    await updateRow(patient.rowNumber, {
+      [generatedKey]: aiResult.generatedMessage,
+      [finalKey]: aiResult.finalMessage
+    });
+
+    const telegramMessage = await sendPatientTaskCard(patient.rowNumber, patient, aiResult.finalMessage);
+
+    await updateRow(patient.rowNumber, {
+      [alertKey]: String(telegramMessage.message_id || "")
+    });
+
+    console.log(`Telegram task sent for row ${patient.rowNumber}`);
+  }
+
+  if (dueCount === 0) {
+    console.log("No due tasks right now.");
+  }
+}
+
+async function runPollingCycle() {
+  if (isRunning) {
+    return;
+  }
+
+  isRunning = true;
+
+  try {
+    await checkNewPatients();
+    await checkDueTasks();
+  } catch (error) {
+    console.error("Polling cycle error:", error.message || error);
+  } finally {
+    isRunning = false;
+  }
+}
+
+function startPollSheetJob() {
+  runPollingCycle();
+
+  setInterval(async () => {
+    await runPollingCycle();
+  }, 20000);
+}
+
+module.exports = {
+  startPollSheetJob,
+  runPollingCycle,
+  checkDueTasks
+};
