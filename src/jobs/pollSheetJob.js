@@ -11,6 +11,11 @@ const {
 } = require("../services/sheetService");
 const { generatePatientMessage } = require("../services/aiService");
 const { sendPatientTaskCard, sendTelegramMessage } = require("../services/telegramService");
+const {
+  notifyError,
+  markPollingSuccess,
+  markPollingError
+} = require("../services/supervisorService");
 
 let isRunning = false;
 
@@ -60,6 +65,7 @@ async function checkCallReminders() {
         `Call reminder failed for row ${patient.rowNumber}:`,
         error.response?.data || error.message || error
       );
+      await notifyError("pollSheetJob.checkCallReminders", error);
     }
   }
 }
@@ -151,6 +157,7 @@ async function checkDueTasks() {
         `Failed due follow-up for row ${patient.rowNumber}:`,
         error.response?.data || error.message || error
       );
+      await notifyError("pollSheetJob.checkDueTasks", error);
     }
   }
 
@@ -179,17 +186,23 @@ async function runPollingCycle() {
           "Failed to send pre-reset notification:",
           error.response?.data || error.message || error
         );
+        await notifyError("pollSheetJob.preResetNotification", error);
       }
 
       console.log(`Patients sheet auto-reset completed at threshold ${resetResult.filledCount}.`);
+      markPollingSuccess();
       return;
     }
 
     await checkNewPatients();
     await checkCallReminders();
     await checkDueTasks();
+
+    markPollingSuccess();
   } catch (error) {
     console.error("Polling cycle error:", error.message || error);
+    markPollingError(error);
+    await notifyError("pollSheetJob.runPollingCycle", error);
   } finally {
     isRunning = false;
   }

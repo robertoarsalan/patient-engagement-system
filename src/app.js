@@ -16,6 +16,11 @@ const {
   answerCallbackQuery,
   getTelegramWebhookInfo
 } = require("./services/telegramService");
+const {
+  notifyError,
+  startSupervisor,
+  installGlobalErrorHandlers
+} = require("./services/supervisorService");
 
 const app = express();
 app.use(express.json());
@@ -49,7 +54,6 @@ function getTurkeyNowDate() {
 }
 
 function buildTurkeyDate(year, month, day, hour, minute, second = 0) {
-  // Istanbul UTC+3
   return new Date(Date.UTC(year, month - 1, day, hour - 3, minute, second));
 }
 
@@ -69,7 +73,6 @@ function parseCallReminderInput(text) {
   const short = raw.match(/^(\d{2}):(\d{2})$/);
   if (short) {
     const trNow = getTurkeyNowDate();
-
     const hour = Number(short[1]);
     const minute = Number(short[2]);
 
@@ -84,10 +87,9 @@ function parseCallReminderInput(text) {
 
     const nowUtc = new Date();
     if (reminderDate.getTime() <= nowUtc.getTime()) {
-      const tomorrow = new Date(
+      reminderDate = new Date(
         Date.UTC(trNow.year, trNow.month - 1, trNow.day + 1, hour - 3, minute, 0)
       );
-      reminderDate = tomorrow;
     }
 
     return reminderDate;
@@ -99,6 +101,10 @@ function parseCallReminderInput(text) {
 function getLast4(phone) {
   const digits = String(phone || "").replace(/\D/g, "");
   return digits.slice(-4) || "----";
+}
+
+function toBoolSafe(value) {
+  return String(value || "").trim().toLowerCase() === "true";
 }
 
 app.get("/", (req, res) => {
@@ -125,6 +131,7 @@ app.get("/telegram-webhook-info", async (req, res) => {
     res.json(info);
   } catch (error) {
     console.error("Webhook info error:", error.response?.data || error.message || error);
+    await notifyError("app.telegram-webhook-info", error);
     res.status(500).json({
       ok: false,
       error: error.response?.data || error.message || String(error)
@@ -206,6 +213,7 @@ app.post("/telegram-webhook", async (req, res) => {
           return res.json({ ok: true });
         } catch (error) {
           console.error("Send Message action failed:", error.response?.data || error.message || error);
+          await notifyError("app.action.message", error);
           await answerCallbackQuery(callbackQueryId, "Send Message failed");
           return res.status(500).json({
             ok: false,
@@ -237,6 +245,7 @@ YYYY-MM-DD HH:mm`
           return res.json({ ok: true });
         } catch (error) {
           console.error("Call action failed:", error.response?.data || error.message || error);
+          await notifyError("app.action.call", error);
           await answerCallbackQuery(callbackQueryId, "Call reminder failed");
           return res.status(500).json({
             ok: false,
@@ -271,6 +280,7 @@ YYYY-MM-DD HH:mm`
           return res.json({ ok: true });
         } catch (error) {
           console.error("Regenerate action failed:", error.response?.data || error.message || error);
+          await notifyError("app.action.regen", error);
           await answerCallbackQuery(callbackQueryId, "Regenerate failed");
           return res.status(500).json({
             ok: false,
@@ -302,6 +312,7 @@ YYYY-MM-DD HH:mm`
           return res.json({ ok: true });
         } catch (error) {
           console.error("Done action failed:", error.response?.data || error.message || error);
+          await notifyError("app.action.done", error);
           await answerCallbackQuery(callbackQueryId, "Done failed");
           return res.status(500).json({
             ok: false,
@@ -333,6 +344,7 @@ YYYY-MM-DD HH:mm`
           return res.json({ ok: true });
         } catch (error) {
           console.error("Snooze action failed:", error.response?.data || error.message || error);
+          await notifyError("app.action.snooze15", error);
           await answerCallbackQuery(callbackQueryId, "Snooze failed");
           return res.status(500).json({
             ok: false,
@@ -364,6 +376,7 @@ YYYY-MM-DD HH:mm`
           return res.json({ ok: true });
         } catch (error) {
           console.error("Hot action failed:", error.response?.data || error.message || error);
+          await notifyError("app.action.hot", error);
           await answerCallbackQuery(callbackQueryId, "Hot lead failed");
           return res.status(500).json({
             ok: false,
@@ -413,6 +426,7 @@ YYYY-MM-DD HH:mm`
     return res.json({ ok: true });
   } catch (error) {
     console.error("Telegram webhook error:", error.response?.data || error.message || error);
+    await notifyError("app.telegram-webhook", error);
     return res.status(500).json({
       ok: false,
       error: error.response?.data || error.message || String(error)
@@ -420,12 +434,11 @@ YYYY-MM-DD HH:mm`
   }
 });
 
-function toBoolSafe(value) {
-  return String(value || "").trim().toLowerCase() === "true";
-}
+installGlobalErrorHandlers();
 
 app.listen(env.PORT, () => {
   console.log(`Server running on http://localhost:${env.PORT}`);
   console.log("🚀 Polling job started...");
+  startSupervisor();
   startPollSheetJob();
 });
