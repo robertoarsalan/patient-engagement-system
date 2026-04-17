@@ -41,9 +41,10 @@ async function checkCallReminders() {
     try {
       await sendTelegramMessage(
         `📞 Call reminder
-👤 ${patient.full_name || ""}
-📱 ${getLast4(patient.phone)}
-⏰ ${reminderAt} (TR time)`
+
+👤 Patient: ${patient.full_name || ""}
+📱 Last 4 digits: ${getLast4(patient.phone)}
+⏰ Reminder time: ${reminderAt} (TR time)`
       );
 
       await updateRow(patient.rowNumber, {
