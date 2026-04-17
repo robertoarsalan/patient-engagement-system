@@ -41,16 +41,31 @@ function now() {
   return new Date();
 }
 
+/**
+ * Parse sheet datetime saved as:
+ * YYYY-MM-DD HH:mm:ss
+ * and interpret it as Turkey local time (Europe/Istanbul), not server local time.
+ */
 function parseSheetDateTime(datetime) {
   if (!datetime) return null;
 
   const raw = String(datetime).trim();
   if (!raw) return null;
 
-  const normalized = raw.replace(" ", "T");
-  const d = new Date(normalized);
-  if (Number.isNaN(d.getTime())) return null;
-  return d;
+  const match = raw.match(
+    /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})$/
+  );
+
+  if (!match) return null;
+
+  const [, y, m, d, hh, mm, ss] = match.map(Number);
+
+  // Turkey is UTC+3 with no DST
+  const utcMillis = Date.UTC(y, m - 1, d, hh - 3, mm, ss);
+  const parsed = new Date(utcMillis);
+
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
 }
 
 function isDue(datetime) {

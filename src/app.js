@@ -89,8 +89,6 @@ app.post("/telegram-webhook", async (req, res) => {
 
     if (action === "message") {
       try {
-        console.log(`Processing Send Message for row ${rowNumber}...`);
-
         const settings = await getSettings();
         let finalMessage = patient[lastFinalMessageKey] || "";
 

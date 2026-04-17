@@ -34,6 +34,16 @@ async function checkDueTasks() {
     const telegramLastAlertId = patient[alertKey];
     const nextAction = String(patient[actionKey] || "").trim();
 
+    console.log("Due check:", {
+      rowNumber: patient.rowNumber,
+      patient_id: patient.patient_id || "",
+      currentTaskActive,
+      nextFollowupAt,
+      telegramLastAlertId,
+      nextAction,
+      due: isDue(nextFollowupAt)
+    });
+
     if (!currentTaskActive) continue;
     if (!hasValue(nextFollowupAt)) continue;
     if (!isDue(nextFollowupAt)) continue;
