@@ -42,9 +42,9 @@ function now() {
 }
 
 /**
- * Parse sheet datetime saved as:
+ * Sheet stores Turkey local time in format:
  * YYYY-MM-DD HH:mm:ss
- * and interpret it as Turkey local time (Europe/Istanbul), not server local time.
+ * We convert it manually to UTC Date so comparisons work correctly on Railway.
  */
 function parseSheetDateTime(datetime) {
   if (!datetime) return null;
@@ -58,10 +58,15 @@ function parseSheetDateTime(datetime) {
 
   if (!match) return null;
 
-  const [, y, m, d, hh, mm, ss] = match.map(Number);
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6]);
 
-  // Turkey is UTC+3 with no DST
-  const utcMillis = Date.UTC(y, m - 1, d, hh - 3, mm, ss);
+  // Istanbul = UTC+3
+  const utcMillis = Date.UTC(year, month - 1, day, hour - 3, minute, second);
   const parsed = new Date(utcMillis);
 
   if (Number.isNaN(parsed.getTime())) return null;
@@ -69,9 +74,9 @@ function parseSheetDateTime(datetime) {
 }
 
 function isDue(datetime) {
-  const d = parseSheetDateTime(datetime);
-  if (!d) return false;
-  return d.getTime() <= Date.now();
+  const parsed = parseSheetDateTime(datetime);
+  if (!parsed) return false;
+  return parsed.getTime() <= Date.now();
 }
 
 function mapRows(headers, rows) {

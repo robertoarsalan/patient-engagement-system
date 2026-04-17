@@ -23,6 +23,9 @@ async function checkDueTasks() {
   const finalKey = findHeader(headers, "last_final_message");
   const updatedAtKey = findHeader(headers, "updated_at");
   const actionKey = findHeader(headers, "next_action");
+  const statusKey = findHeader(headers, "status");
+  const subStatusKey = findHeader(headers, "sub_status");
+  const taskTypeKey = findHeader(headers, "current_task_type");
 
   console.log("Checking sheet for due tasks...");
 
@@ -33,20 +36,29 @@ async function checkDueTasks() {
     const nextFollowupAt = patient[followupKey];
     const telegramLastAlertId = patient[alertKey];
     const nextAction = String(patient[actionKey] || "").trim();
+    const status = String(patient[statusKey] || "").trim();
+    const subStatus = String(patient[subStatusKey] || "").trim();
+    const taskType = String(patient[taskTypeKey] || "").trim();
+
+    const due = isDue(nextFollowupAt);
 
     console.log("Due check:", {
       rowNumber: patient.rowNumber,
       patient_id: patient.patient_id || "",
+      full_name: patient.full_name || "",
       currentTaskActive,
       nextFollowupAt,
       telegramLastAlertId,
       nextAction,
-      due: isDue(nextFollowupAt)
+      status,
+      subStatus,
+      taskType,
+      due
     });
 
     if (!currentTaskActive) continue;
     if (!hasValue(nextFollowupAt)) continue;
-    if (!isDue(nextFollowupAt)) continue;
+    if (!due) continue;
     if (hasValue(telegramLastAlertId)) continue;
     if (nextAction !== "wait_patient_reply") continue;
 
@@ -54,26 +66,41 @@ async function checkDueTasks() {
 
     console.log(`Due follow-up found for row ${patient.rowNumber} (${patient.patient_id || ""})`);
 
-    const aiResult = await generatePatientMessage(patient);
+    try {
+      const aiResult = await generatePatientMessage({
+        ...patient,
+        [taskTypeKey]: "follow_up"
+      });
 
-    await updateRow(patient.rowNumber, {
-      [generatedKey]: aiResult.generatedMessage,
-      [finalKey]: aiResult.finalMessage,
-      [updatedAtKey]: formatDate(new Date())
-    });
+      await updateRow(patient.rowNumber, {
+        [generatedKey]: aiResult.generatedMessage,
+        [finalKey]: aiResult.finalMessage,
+        [updatedAtKey]: formatDate(new Date())
+      });
 
-    const telegramMessage = await sendPatientTaskCard(
-      patient.rowNumber,
-      { ...patient, [finalKey]: aiResult.finalMessage },
-      aiResult.finalMessage
-    );
+      const telegramMessage = await sendPatientTaskCard(
+        patient.rowNumber,
+        {
+          ...patient,
+          [generatedKey]: aiResult.generatedMessage,
+          [finalKey]: aiResult.finalMessage,
+          [taskTypeKey]: "follow_up"
+        },
+        aiResult.finalMessage
+      );
 
-    await updateRow(patient.rowNumber, {
-      [alertKey]: String(telegramMessage.message_id || ""),
-      [updatedAtKey]: formatDate(new Date())
-    });
+      await updateRow(patient.rowNumber, {
+        [alertKey]: String(telegramMessage.message_id || ""),
+        [updatedAtKey]: formatDate(new Date())
+      });
 
-    console.log(`Follow-up Telegram task sent for row ${patient.rowNumber}`);
+      console.log(`Follow-up Telegram task sent for row ${patient.rowNumber}`);
+    } catch (error) {
+      console.error(
+        `Failed due follow-up for row ${patient.rowNumber}:`,
+        error.response?.data || error.message || error
+      );
+    }
   }
 
   if (dueCount === 0) {
@@ -100,7 +127,7 @@ function startPollSheetJob() {
 
   setInterval(async () => {
     await runPollingCycle();
-  }, 20000);
+  }, 10000);
 }
 
 module.exports = {
