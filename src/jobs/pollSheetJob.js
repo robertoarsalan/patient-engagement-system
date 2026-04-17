@@ -6,7 +6,8 @@ const {
   toBool,
   findHeader,
   updateRow,
-  formatDate
+  formatDate,
+  resetPatientsSheetIfThresholdReached
 } = require("../services/sheetService");
 const { generatePatientMessage } = require("../services/aiService");
 const { sendPatientTaskCard, sendTelegramMessage } = require("../services/telegramService");
@@ -163,6 +164,13 @@ async function runPollingCycle() {
   isRunning = true;
 
   try {
+    const resetResult = await resetPatientsSheetIfThresholdReached();
+
+    if (resetResult.triggered) {
+      console.log(`Patients sheet auto-reset completed at threshold ${resetResult.filledCount}.`);
+      return;
+    }
+
     await checkNewPatients();
     await checkCallReminders();
     await checkDueTasks();

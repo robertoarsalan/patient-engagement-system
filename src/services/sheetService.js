@@ -6,6 +6,8 @@ const SHEET_NAME = "patients";
 const MESSAGE_LOG_SHEET = "message_log";
 const STATUS_HISTORY_SHEET = "status_history";
 const SETTINGS_SHEET = "settings";
+const PATIENTS_RANGE_END = "AO";
+const AUTO_RESET_THRESHOLD = 500;
 
 function getSheetsClient() {
   const auth = new google.auth.GoogleAuth({
@@ -60,7 +62,7 @@ function parseSheetDateTime(datetime) {
   const minute = Number(match[5]);
   const second = Number(match[6]);
 
-  // Istanbul = UTC+3
+  // Europe/Istanbul = UTC+3
   const utcMillis = Date.UTC(year, month - 1, day, hour - 3, minute, second);
   const parsed = new Date(utcMillis);
 
@@ -93,7 +95,7 @@ async function getSheetData() {
 
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: env.GOOGLE_SHEET_ID,
-    range: `${SHEET_NAME}!A:AO`
+    range: `${SHEET_NAME}!A:${PATIENTS_RANGE_END}`
   });
 
   const rows = res.data.values || [];
@@ -131,7 +133,7 @@ async function updateRow(rowNumber, updates) {
 
   const currentRowRes = await sheets.spreadsheets.values.get({
     spreadsheetId: env.GOOGLE_SHEET_ID,
-    range: `${SHEET_NAME}!A${rowNumber}:AO${rowNumber}`,
+    range: `${SHEET_NAME}!A${rowNumber}:${PATIENTS_RANGE_END}${rowNumber}`,
     valueRenderOption: "FORMULA"
   });
 
@@ -149,7 +151,7 @@ async function updateRow(rowNumber, updates) {
 
   await sheets.spreadsheets.values.update({
     spreadsheetId: env.GOOGLE_SHEET_ID,
-    range: `${SHEET_NAME}!A${rowNumber}:AO${rowNumber}`,
+    range: `${SHEET_NAME}!A${rowNumber}:${PATIENTS_RANGE_END}${rowNumber}`,
     valueInputOption: "USER_ENTERED",
     requestBody: {
       values: [mergedRow]
@@ -309,6 +311,73 @@ async function markSent(patient, headers, settings, finalMessage) {
   };
 }
 
+async function resetPatientsSheetIfThresholdReached() {
+  const sheets = getSheetsClient();
+
+  const valuesRes = await sheets.spreadsheets.values.get({
+    spreadsheetId: env.GOOGLE_SHEET_ID,
+    range: `${SHEET_NAME}!A:${PATIENTS_RANGE_END}`
+  });
+
+  const rows = valuesRes.data.values || [];
+  if (rows.length <= 1) {
+    return { triggered: false, filledCount: 0 };
+  }
+
+  const headers = rows[0].map(normalizeHeader);
+  const fullNameIndex = headers.findIndex((h) => h === "full_name");
+
+  if (fullNameIndex === -1) {
+    return { triggered: false, filledCount: 0 };
+  }
+
+  let filledCount = 0;
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i] || [];
+    const fullName = row[fullNameIndex];
+    if (hasValue(fullName)) {
+      filledCount++;
+    }
+  }
+
+  if (filledCount < AUTO_RESET_THRESHOLD) {
+    return { triggered: false, filledCount };
+  }
+
+  console.log(`Patients threshold reached (${filledCount}). Resetting patient rows while preserving formulas...`);
+
+  const formulaRes = await sheets.spreadsheets.values.get({
+    spreadsheetId: env.GOOGLE_SHEET_ID,
+    range: `${SHEET_NAME}!A2:${PATIENTS_RANGE_END}`,
+    valueRenderOption: "FORMULA"
+  });
+
+  const formulaRows = formulaRes.data.values || [];
+  const cleanedRows = formulaRows.map((row) =>
+    row.map((cell) => {
+      const value = String(cell ?? "");
+      if (value.startsWith("=")) {
+        return value;
+      }
+      return "";
+    })
+  );
+
+  if (cleanedRows.length > 0) {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: env.GOOGLE_SHEET_ID,
+      range: `${SHEET_NAME}!A2:${PATIENTS_RANGE_END}${cleanedRows.length + 1}`,
+      valueInputOption: "USER_ENTERED",
+      requestBody: {
+        values: cleanedRows
+      }
+    });
+  }
+
+  console.log("Patients sheet reset complete.");
+  return { triggered: true, filledCount };
+}
+
 module.exports = {
   getSheetData,
   getSettings,
@@ -323,5 +392,6 @@ module.exports = {
   formatDate,
   addMinutes,
   parseSheetDateTime,
-  getMixedReminderPlan
+  getMixedReminderPlan,
+  resetPatientsSheetIfThresholdReached
 };
