@@ -208,21 +208,42 @@ async function appendStatusHistory(data) {
 }
 
 /**
- * Absolute reminder schedule from FIRST send:
- * counter 1 => + reminder_1_minutes
- * counter 2 => + reminder_2_minutes
- * counter 3+ => + reminder_3_minutes
+ * Mixed timing logic:
+ * 1st reminder  => absolute from first send
+ * 2nd reminder  => absolute from first send
+ * 3rd reminder+ => relative from the most recent send
+ *
+ * Example settings:
+ * reminder_1_minutes = 60
+ * reminder_2_minutes = 120
+ * reminder_3_minutes = 150
  */
-function getAbsoluteReminderMinutes(counter, settings) {
+function getMixedReminderPlan(counter, settings, firstSentTime, currentSendTime) {
   const r1 = Number(settings.reminder_1_minutes || 60);
   const r2 = Number(settings.reminder_2_minutes || 120);
   const r3 = Number(settings.reminder_3_minutes || 150);
 
-  if (counter === 1) return r1;
-  if (counter === 2) return r2;
-  if (counter >= 3) return r3;
+  if (counter === 1) {
+    return {
+      minutes: r1,
+      baseTime: firstSentTime,
+      nextDate: addMinutes(firstSentTime, r1)
+    };
+  }
 
-  return r1;
+  if (counter === 2) {
+    return {
+      minutes: r2,
+      baseTime: firstSentTime,
+      nextDate: addMinutes(firstSentTime, r2)
+    };
+  }
+
+  return {
+    minutes: r3,
+    baseTime: currentSendTime,
+    nextDate: addMinutes(currentSendTime, r3)
+  };
 }
 
 async function markSent(patient, headers, settings, finalMessage) {
@@ -246,12 +267,18 @@ async function markSent(patient, headers, settings, finalMessage) {
   const count = Number(patient[countKey] || 0);
   const stalled = Number(patient[stalledKey] || 0) + 1;
 
-  const firstSentTime = patient[lastAgentKey]
-    ? parseSheetDateTime(patient[lastAgentKey]) || new Date()
-    : new Date();
+  const currentSendTime = new Date();
 
-  const minutes = getAbsoluteReminderMinutes(stalled, settings);
-  const nextDate = addMinutes(firstSentTime, minutes);
+  const firstSentTime = patient[lastAgentKey]
+    ? parseSheetDateTime(patient[lastAgentKey]) || currentSendTime
+    : currentSendTime;
+
+  const plan = getMixedReminderPlan(
+    stalled,
+    settings,
+    firstSentTime,
+    currentSendTime
+  );
 
   await updateRow(patient.rowNumber, {
     [statusKey]: settings.status_after_send || "contacted",
@@ -259,18 +286,18 @@ async function markSent(patient, headers, settings, finalMessage) {
     [typeKey]: "follow_up",
     [activeKey]: "TRUE",
     [actionKey]: "wait_patient_reply",
-    [followKey]: formatDate(nextDate),
+    [followKey]: formatDate(plan.nextDate),
     [lastAgentKey]: patient[lastAgentKey] || formatDate(firstSentTime),
     [generatedKey]: patient[generatedKey] || "",
     [finalKey]: finalMessage,
     [stalledKey]: String(stalled),
     [countKey]: String(count + 1),
     [alertKey]: "",
-    [updatedAtKey]: formatDate(new Date())
+    [updatedAtKey]: formatDate(currentSendTime)
   });
 
   await appendMessageLog({
-    timestamp: formatDate(new Date()),
+    timestamp: formatDate(currentSendTime),
     patient_id: patient.patient_id || "",
     rowNumber: patient.rowNumber,
     channel: "telegram_action",
@@ -281,7 +308,7 @@ async function markSent(patient, headers, settings, finalMessage) {
   });
 
   await appendStatusHistory({
-    timestamp: formatDate(new Date()),
+    timestamp: formatDate(currentSendTime),
     patient_id: patient.patient_id || "",
     rowNumber: patient.rowNumber,
     old_status: oldStatus,
@@ -292,8 +319,8 @@ async function markSent(patient, headers, settings, finalMessage) {
   });
 
   return {
-    nextFollowupAt: formatDate(nextDate),
-    minutes
+    nextFollowupAt: formatDate(plan.nextDate),
+    minutes: plan.minutes
   };
 }
 
@@ -311,5 +338,5 @@ module.exports = {
   formatDate,
   addMinutes,
   parseSheetDateTime,
-  getAbsoluteReminderMinutes
+  getMixedReminderPlan
 };
