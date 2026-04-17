@@ -167,6 +167,20 @@ async function runPollingCycle() {
     const resetResult = await resetPatientsSheetIfThresholdReached();
 
     if (resetResult.triggered) {
+      try {
+        await sendTelegramMessage(
+          `⚠️ Patients sheet reached ${resetResult.filledCount} names.
+
+🧹 Resetting patient rows now.
+✅ Headers, formulas, settings, and logs are preserved.`
+        );
+      } catch (error) {
+        console.error(
+          "Failed to send pre-reset notification:",
+          error.response?.data || error.message || error
+        );
+      }
+
       console.log(`Patients sheet auto-reset completed at threshold ${resetResult.filledCount}.`);
       return;
     }
