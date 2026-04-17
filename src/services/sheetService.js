@@ -60,7 +60,7 @@ function parseSheetDateTime(datetime) {
   const minute = Number(match[5]);
   const second = Number(match[6]);
 
-  // Europe/Istanbul = UTC+3
+  // Istanbul = UTC+3
   const utcMillis = Date.UTC(year, month - 1, day, hour - 3, minute, second);
   const parsed = new Date(utcMillis);
 
@@ -93,7 +93,7 @@ async function getSheetData() {
 
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: env.GOOGLE_SHEET_ID,
-    range: `${SHEET_NAME}!A:AL`
+    range: `${SHEET_NAME}!A:AO`
   });
 
   const rows = res.data.values || [];
@@ -131,7 +131,7 @@ async function updateRow(rowNumber, updates) {
 
   const currentRowRes = await sheets.spreadsheets.values.get({
     spreadsheetId: env.GOOGLE_SHEET_ID,
-    range: `${SHEET_NAME}!A${rowNumber}:AL${rowNumber}`,
+    range: `${SHEET_NAME}!A${rowNumber}:AO${rowNumber}`,
     valueRenderOption: "FORMULA"
   });
 
@@ -149,7 +149,7 @@ async function updateRow(rowNumber, updates) {
 
   await sheets.spreadsheets.values.update({
     spreadsheetId: env.GOOGLE_SHEET_ID,
-    range: `${SHEET_NAME}!A${rowNumber}:AL${rowNumber}`,
+    range: `${SHEET_NAME}!A${rowNumber}:AO${rowNumber}`,
     valueInputOption: "USER_ENTERED",
     requestBody: {
       values: [mergedRow]
@@ -207,17 +207,6 @@ async function appendStatusHistory(data) {
   }
 }
 
-/**
- * Mixed timing logic:
- * 1st reminder  => absolute from first send
- * 2nd reminder  => absolute from first send
- * 3rd reminder+ => relative from the most recent send
- *
- * Example settings:
- * reminder_1_minutes = 60
- * reminder_2_minutes = 120
- * reminder_3_minutes = 150
- */
 function getMixedReminderPlan(counter, settings, firstSentTime, currentSendTime) {
   const r1 = Number(settings.reminder_1_minutes || 60);
   const r2 = Number(settings.reminder_2_minutes || 120);
@@ -226,7 +215,6 @@ function getMixedReminderPlan(counter, settings, firstSentTime, currentSendTime)
   if (counter === 1) {
     return {
       minutes: r1,
-      baseTime: firstSentTime,
       nextDate: addMinutes(firstSentTime, r1)
     };
   }
@@ -234,14 +222,12 @@ function getMixedReminderPlan(counter, settings, firstSentTime, currentSendTime)
   if (counter === 2) {
     return {
       minutes: r2,
-      baseTime: firstSentTime,
       nextDate: addMinutes(firstSentTime, r2)
     };
   }
 
   return {
     minutes: r3,
-    baseTime: currentSendTime,
     nextDate: addMinutes(currentSendTime, r3)
   };
 }
@@ -268,7 +254,6 @@ async function markSent(patient, headers, settings, finalMessage) {
   const stalled = Number(patient[stalledKey] || 0) + 1;
 
   const currentSendTime = new Date();
-
   const firstSentTime = patient[lastAgentKey]
     ? parseSheetDateTime(patient[lastAgentKey]) || currentSendTime
     : currentSendTime;

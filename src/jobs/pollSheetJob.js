@@ -9,9 +9,58 @@ const {
   formatDate
 } = require("../services/sheetService");
 const { generatePatientMessage } = require("../services/aiService");
-const { sendPatientTaskCard } = require("../services/telegramService");
+const { sendPatientTaskCard, sendTelegramMessage } = require("../services/telegramService");
 
 let isRunning = false;
+
+function getLast4(phone) {
+  const digits = String(phone || "").replace(/\D/g, "");
+  return digits.slice(-4) || "----";
+}
+
+async function checkCallReminders() {
+  const { headers, patients } = await getSheetData();
+
+  const callReminderAtKey = findHeader(headers, "call_reminder_at");
+  const callReminderActiveKey = findHeader(headers, "call_reminder_active");
+  const callPendingInputKey = findHeader(headers, "call_pending_input");
+  const updatedAtKey = findHeader(headers, "updated_at");
+
+  if (!callReminderAtKey || !callReminderActiveKey) {
+    return;
+  }
+
+  for (const patient of patients) {
+    const active = toBool(patient[callReminderActiveKey]);
+    const reminderAt = patient[callReminderAtKey];
+
+    if (!active) continue;
+    if (!hasValue(reminderAt)) continue;
+    if (!isDue(reminderAt)) continue;
+
+    try {
+      await sendTelegramMessage(
+        `📞 Call reminder
+👤 ${patient.full_name || ""}
+📱 ${getLast4(patient.phone)}
+⏰ ${reminderAt} (TR time)`
+      );
+
+      await updateRow(patient.rowNumber, {
+        [callReminderActiveKey]: "FALSE",
+        [callPendingInputKey]: "FALSE",
+        [updatedAtKey]: formatDate(new Date())
+      });
+
+      console.log(`Call reminder sent for row ${patient.rowNumber}`);
+    } catch (error) {
+      console.error(
+        `Call reminder failed for row ${patient.rowNumber}:`,
+        error.response?.data || error.message || error
+      );
+    }
+  }
+}
 
 async function checkDueTasks() {
   const { headers, patients } = await getSheetData();
@@ -114,6 +163,7 @@ async function runPollingCycle() {
 
   try {
     await checkNewPatients();
+    await checkCallReminders();
     await checkDueTasks();
   } catch (error) {
     console.error("Polling cycle error:", error.message || error);
@@ -133,5 +183,6 @@ function startPollSheetJob() {
 module.exports = {
   startPollSheetJob,
   runPollingCycle,
-  checkDueTasks
+  checkDueTasks,
+  checkCallReminders
 };
