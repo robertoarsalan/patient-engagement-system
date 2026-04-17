@@ -2,210 +2,240 @@ const OpenAI = require("openai");
 const Anthropic = require("@anthropic-ai/sdk");
 const env = require("../config/env");
 
-const openai = new OpenAI({
-  apiKey: env.OPENAI_API_KEY
-});
+const openai = env.OPENAI_API_KEY
+  ? new OpenAI({ apiKey: env.OPENAI_API_KEY })
+  : null;
 
-const anthropic = new Anthropic({
-  apiKey: env.ANTHROPIC_API_KEY
-});
+const anthropic = env.ANTHROPIC_API_KEY
+  ? new Anthropic({ apiKey: env.ANTHROPIC_API_KEY })
+  : null;
 
-function inferStage(patient) {
-  const stalled = Number(patient.stalled_task_counter || 0);
-
-  if (stalled <= 0) return "initial";
-  if (stalled === 1) return "followup_1";
-  if (stalled === 2) return "followup_2";
-  return "followup_3plus";
+function cleanText(text) {
+  return String(text || "")
+    .replace(/\r/g, "")
+    .trim();
 }
 
-function inferTone(age, ageGroup) {
-  const ageNum = Number(age || 0);
-  const group = String(ageGroup || "").trim().toLowerCase();
-
-  if (group.includes("young") || (ageNum > 0 && ageNum < 30)) {
-    return "warmer, modern, natural, human";
-  }
-
-  if (group.includes("30") || (ageNum >= 30 && ageNum <= 45)) {
-    return "clear, confident, reassuring";
-  }
-
-  if (group.includes("45") || group.includes("60") || (ageNum > 45 && ageNum <= 60)) {
-    return "calm, respectful, structured";
-  }
-
-  if (ageNum > 60 || group.includes("60+")) {
-    return "elegant, reassuring, respectful";
-  }
-
-  return "clear, empathetic, professional";
+function getPatientName(patient) {
+  return patient.full_name || patient.name || "Paziente";
 }
 
-function fallbackMessage(patient) {
-  const name = patient.full_name || "Ciao";
-  const stalled = Number(patient.stalled_task_counter || 0);
+function getReminderStage(patient) {
+  const count = Number(patient.stalled_task_counter || 0);
 
-  if (stalled <= 0) {
-    return `Ciao ${name} 👋
+  if (count <= 0) return 0;
+  if (count === 1) return 1;
+  if (count === 2) return 2;
+  return 3;
+}
+
+function buildSystemPrompt() {
+  return `
+You are a highly effective medical tourism follow-up assistant for Italian-speaking leads.
+
+Your job:
+- Write short WhatsApp-style follow-up messages in Italian
+- Keep them human, warm, professional, and persuasive
+- Never sound robotic
+- Never write long paragraphs
+- Never use heavy formatting
+- Keep messages concise and natural
+- Use the patient's first name naturally
+- Focus on re-engagement and next step
+- Do not invent medical facts
+- Do not mention internal systems, AI, automation, CRM, reminders, or scheduling logic
+- Do not use more than 2 emojis total
+- Output only the final message text
+
+Tone rules:
+- Stage 0 = initial response after photos received
+- Stage 1 = soft follow-up after no reply
+- Stage 2 = more direct follow-up with gentle momentum
+- Stage 3 = stronger follow-up with light urgency and clear action
+
+Language:
+- Always in Italian
+`;
+}
+
+function buildUserPrompt(patient) {
+  const name = getPatientName(patient);
+  const stage = getReminderStage(patient);
+  const treatmentType = patient.treatment_type || "";
+  const status = patient.status || "";
+  const subStatus = patient.sub_status || "";
+  const market = patient.market || "";
+  const ageGroup = patient.age_group || "";
+  const notes = patient.notes || "";
+
+  let stageInstruction = "";
+
+  if (stage === 0) {
+    stageInstruction = `
+Write the FIRST message after receiving the patient's photos.
+Goal:
+- acknowledge receipt
+- say the case is being evaluated carefully
+- say you will update them with the best plan
+- keep it reassuring and professional
+- no pressure
+`;
+  } else if (stage === 1) {
+    stageInstruction = `
+Write FOLLOW-UP #1.
+Goal:
+- soft check-in
+- remind them their case is being followed
+- encourage a reply
+- keep it warm and very light
+- no hard urgency
+`;
+  } else if (stage === 2) {
+    stageInstruction = `
+Write FOLLOW-UP #2.
+Goal:
+- create gentle momentum
+- suggest that if they want, you can help them move to the next step
+- make it slightly more proactive than follow-up #1
+- still polite and natural
+`;
+  } else {
+    stageInstruction = `
+Write FOLLOW-UP #3 or later.
+Goal:
+- create stronger re-engagement
+- mention availability / planning / next step
+- use light urgency, not pressure
+- encourage a concrete reply today
+`;
+  }
+
+  return `
+Patient name: ${name}
+Treatment type: ${treatmentType}
+Status: ${status}
+Sub-status: ${subStatus}
+Market: ${market}
+Age group: ${ageGroup}
+Notes: ${notes}
+
+${stageInstruction}
+
+Requirements:
+- maximum 3 short paragraphs
+- WhatsApp style
+- natural Italian
+- mention the patient's name
+- avoid repetition
+- no bullet points
+- no markdown
+- no signature
+- no placeholders
+`;
+}
+
+async function generateWithOpenAI(patient) {
+  if (!openai) {
+    throw new Error("OPENAI_API_KEY missing");
+  }
+
+  const response = await openai.chat.completions.create({
+    model: env.OPENAI_MODEL || "gpt-5.4-mini",
+    temperature: 0.8,
+    messages: [
+      { role: "system", content: buildSystemPrompt() },
+      { role: "user", content: buildUserPrompt(patient) }
+    ]
+  });
+
+  const text = response.choices?.[0]?.message?.content || "";
+  return cleanText(text);
+}
+
+async function generateWithAnthropic(patient) {
+  if (!anthropic) {
+    throw new Error("ANTHROPIC_API_KEY missing");
+  }
+
+  const response = await anthropic.messages.create({
+    model: env.ANTHROPIC_MODEL || "claude-sonnet-4-6",
+    max_tokens: 300,
+    temperature: 0.8,
+    system: buildSystemPrompt(),
+    messages: [
+      {
+        role: "user",
+        content: buildUserPrompt(patient)
+      }
+    ]
+  });
+
+  const text = response.content?.[0]?.text || "";
+  return cleanText(text);
+}
+
+async function generatePatientMessage(patient) {
+  let generatedMessage = "";
+
+  try {
+    if (anthropic) {
+      generatedMessage = await generateWithAnthropic(patient);
+    } else if (openai) {
+      generatedMessage = await generateWithOpenAI(patient);
+    } else {
+      throw new Error("No AI provider configured");
+    }
+  } catch (primaryError) {
+    console.error("Primary AI provider failed:", primaryError.message || primaryError);
+
+    if (!generatedMessage) {
+      try {
+        if (openai) {
+          generatedMessage = await generateWithOpenAI(patient);
+        } else if (anthropic) {
+          generatedMessage = await generateWithAnthropic(patient);
+        }
+      } catch (fallbackError) {
+        console.error("Fallback AI provider failed:", fallbackError.message || fallbackError);
+      }
+    }
+  }
+
+  if (!generatedMessage) {
+    const name = getPatientName(patient);
+    const stage = getReminderStage(patient);
+
+    if (stage === 0) {
+      generatedMessage = `Ciao ${name} 👋
 
 Abbiamo ricevuto le tue foto e stiamo valutando il tuo caso con attenzione.
 
 Ti aggiorno appena la valutazione è pronta, così posso spiegarti il piano più adatto a te.`;
+    } else if (stage === 1) {
+      generatedMessage = `Ciao ${name} 👋
+
+Volevo solo ricontattarti perché stiamo seguendo il tuo caso con attenzione.
+
+Se vuoi, ti aggiorno io sul prossimo passo.`;
+    } else if (stage === 2) {
+      generatedMessage = `Ciao ${name} 👋
+
+Ti scrivo perché possiamo aiutarti a organizzare il prossimo passo in modo semplice e chiaro.
+
+Se vuoi, ti spiego tutto io direttamente qui.`;
+    } else {
+      generatedMessage = `Ciao ${name} 👋
+
+Se vuoi procedere, questo è un buon momento per organizzare tutto con calma e senza complicazioni.
+
+Scrivimi pure e ti aiuto io passo dopo passo.`;
+    }
   }
 
-  if (stalled === 1) {
-    return `Ciao ${name} 👋
-
-Sto seguendo la tua richiesta. Le foto sono in valutazione e stiamo preparando un piano personalizzato per te.
-
-Ti aggiorno appena è pronto.`;
-  }
-
-  if (stalled === 2) {
-    return `Ciao ${name} 👋
-
-Ti confermo che stiamo ancora controllando tutto con attenzione per preparare una valutazione personalizzata.
-
-Appena è pronta ti aggiorno subito.`;
-  }
-
-  return `Ciao ${name} 👋
-
-La tua valutazione è ancora in lavorazione e stiamo verificando tutto con attenzione per darti il piano più adatto.
-
-Ti aggiorno appena è pronta.`;
-}
-
-function buildDraftPrompt(patient) {
-  const name = patient.full_name || "";
-  const age = patient.age || "";
-  const ageGroup = patient.age_group || "";
-  const market = patient.market || "";
-  const treatmentType = patient.treatment_type || "";
-  const preferredFormality = patient.preferred_formality || "";
-  const stage = inferStage(patient);
-  const tone = inferTone(age, ageGroup);
-
-  return `
-You are writing a WhatsApp message in Italian for a medical tourism lead.
-
-Patient data:
-- Name: ${name}
-- Age: ${age}
-- Age group: ${ageGroup}
-- Market: ${market}
-- Treatment type: ${treatmentType}
-- Preferred formality: ${preferredFormality}
-- Stage: ${stage}
-- Tone direction: ${tone}
-
-Business context:
-- patient has already sent photos
-- evaluation is ongoing
-- we are carefully reviewing the case
-- a personalized plan is being prepared
-- message should keep patient engaged
-- no fake urgency
-- no hard sales push
-- no medical overclaim
-- no long paragraph walls
-- natural, human, trust-based WhatsApp style
-- short and clear
-
-Output rules:
-- Italian only
-- 3 to 6 short lines
-- use patient's first name if available
-- do not mention AI
-- do not sound robotic
-- do not add price
-- do not add clinic name unless naturally needed
-- no markdown
-- no subject line
-
-Stage intent:
-- initial: confirm photos received and evaluation started
-- followup_1: reassure patient the case is being reviewed
-- followup_2: keep patient warm, say personalized plan is being prepared
-- followup_3plus: still polite and engaged, slightly more proactive but not pushy
-
-Write only the final message text.
-  `.trim();
-}
-
-function buildRefinePrompt(draft, patient) {
-  const tone = inferTone(patient.age, patient.age_group);
-
-  return `
-Refine the following Italian WhatsApp message for a medical tourism lead.
-
-Goals:
-- make it more natural
-- make it more human
-- keep it brief
-- keep trust high
-- adapt tone to age / age_group
-- no hard push
-- no fake urgency
-- Italian only
-- WhatsApp tone
-
-Tone direction:
-${tone}
-
-Draft:
-${draft}
-
-Return only the improved message text.
-  `.trim();
-}
-
-async function generatePatientMessage(patient) {
-  try {
-    const draftPrompt = buildDraftPrompt(patient);
-
-    const draftResponse = await openai.responses.create({
-      model: env.OPENAI_MODEL,
-      input: draftPrompt
-    });
-
-    const generatedMessage =
-      (draftResponse.output_text || "").trim() || fallbackMessage(patient);
-
-    const refinePrompt = buildRefinePrompt(generatedMessage, patient);
-
-    const claudeResponse = await anthropic.messages.create({
-      model: env.ANTHROPIC_MODEL,
-      max_tokens: 300,
-      messages: [
-        {
-          role: "user",
-          content: refinePrompt
-        }
-      ]
-    });
-
-    const finalMessage =
-      (claudeResponse.content || [])
-        .map((item) => item.text || "")
-        .join("")
-        .trim() || generatedMessage;
-
-    return {
-      generatedMessage,
-      finalMessage
-    };
-  } catch (error) {
-    console.error("AI pipeline failed:", error.response?.data || error.message || error);
-
-    const message = fallbackMessage(patient);
-
-    return {
-      generatedMessage: message,
-      finalMessage: message
-    };
-  }
+  return {
+    generatedMessage,
+    finalMessage: generatedMessage
+  };
 }
 
 module.exports = {
