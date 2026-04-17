@@ -29,112 +29,155 @@ function getReminderStage(patient) {
   return 3;
 }
 
-function buildSystemPrompt() {
+function buildDraftSystemPrompt() {
   return `
-You are a highly effective medical tourism follow-up assistant for Italian-speaking leads.
+You are a medical tourism WhatsApp message writer for Italian-speaking leads.
 
-Your job:
-- Write short WhatsApp-style follow-up messages in Italian
-- Keep them human, warm, professional, and persuasive
-- Never sound robotic
-- Never write long paragraphs
-- Never use heavy formatting
-- Keep messages concise and natural
-- Use the patient's first name naturally
-- Focus on re-engagement and next step
+Write short, persuasive, natural-sounding patient messages in Italian.
+
+Rules:
+- Output only the message text
+- Keep it concise and WhatsApp-friendly
+- Professional, warm, human
+- Do not sound robotic
 - Do not invent medical facts
-- Do not mention internal systems, AI, automation, CRM, reminders, or scheduling logic
-- Do not use more than 2 emojis total
-- Output only the final message text
-
-Tone rules:
-- Stage 0 = initial response after photos received
-- Stage 1 = soft follow-up after no reply
-- Stage 2 = more direct follow-up with gentle momentum
-- Stage 3 = stronger follow-up with light urgency and clear action
-
-Language:
+- Do not overpromise
+- Use the patient's first name naturally
+- Max 3 short paragraphs
+- No bullet points
+- No markdown
+- No formal email language
+- At most 2 emojis total
 - Always in Italian
+
+Stage behavior:
+- Stage 0: first reply after photos received
+- Stage 1: soft follow-up
+- Stage 2: more proactive follow-up
+- Stage 3: stronger follow-up with light urgency
 `;
 }
 
-function buildUserPrompt(patient) {
+function buildDraftUserPrompt(patient) {
   const name = getPatientName(patient);
   const stage = getReminderStage(patient);
-  const treatmentType = patient.treatment_type || "";
-  const status = patient.status || "";
-  const subStatus = patient.sub_status || "";
-  const market = patient.market || "";
-  const ageGroup = patient.age_group || "";
-  const notes = patient.notes || "";
 
   let stageInstruction = "";
 
   if (stage === 0) {
     stageInstruction = `
-Write the FIRST message after receiving the patient's photos.
+Write the first message after receiving the patient's photos.
 Goal:
 - acknowledge receipt
 - say the case is being evaluated carefully
+- reassure the patient
 - say you will update them with the best plan
-- keep it reassuring and professional
 - no pressure
 `;
   } else if (stage === 1) {
     stageInstruction = `
-Write FOLLOW-UP #1.
+Write follow-up #1.
 Goal:
 - soft check-in
+- warm, human
 - remind them their case is being followed
-- encourage a reply
-- keep it warm and very light
-- no hard urgency
+- encourage a reply gently
 `;
   } else if (stage === 2) {
     stageInstruction = `
-Write FOLLOW-UP #2.
+Write follow-up #2.
 Goal:
+- slightly more proactive
 - create gentle momentum
-- suggest that if they want, you can help them move to the next step
-- make it slightly more proactive than follow-up #1
-- still polite and natural
+- suggest you can help with the next step
+- still calm and natural
 `;
   } else {
     stageInstruction = `
-Write FOLLOW-UP #3 or later.
+Write follow-up #3 or later.
 Goal:
-- create stronger re-engagement
-- mention availability / planning / next step
-- use light urgency, not pressure
-- encourage a concrete reply today
+- stronger re-engagement
+- light urgency without pressure
+- encourage a concrete reply
+- make it easy for the patient to continue
 `;
   }
 
   return `
 Patient name: ${name}
-Treatment type: ${treatmentType}
-Status: ${status}
-Sub-status: ${subStatus}
-Market: ${market}
-Age group: ${ageGroup}
-Notes: ${notes}
+Treatment type: ${patient.treatment_type || ""}
+Status: ${patient.status || ""}
+Sub-status: ${patient.sub_status || ""}
+Market: ${patient.market || ""}
+Age group: ${patient.age_group || ""}
+Notes: ${patient.notes || ""}
 
 ${stageInstruction}
 
-Requirements:
-- maximum 3 short paragraphs
-- WhatsApp style
-- natural Italian
-- mention the patient's name
-- avoid repetition
-- no bullet points
-- no markdown
-- no signature
-- no placeholders
+Write one final Italian WhatsApp message.
 `;
 }
 
-async function generateWithOpenAI(patient) {
+function buildRefineSystemPrompt() {
+  return `
+You refine Italian WhatsApp lead messages for medical tourism.
+
+Your job:
+- rewrite the draft to sound more human, smoother, and less robotic
+- preserve meaning and structure
+- make it feel like a top closer wrote it
+
+Style blend:
+- Chris Voss style:
+  - calm
+  - empathetic
+  - non-needy
+  - controlled
+  - subtle emotional intelligence
+- Alex Hormozi style:
+  - clear
+  - high-value
+  - practical
+  - momentum-oriented
+  - easy next step
+
+Rules:
+- Always in Italian
+- Keep it short and natural
+- WhatsApp tone only
+- No fake hype
+- No exaggerated promises
+- No cheesy sales language
+- No markdown
+- No bullet points
+- No quotation marks around the message
+- Output only the final refined message
+- Max 3 short paragraphs
+- At most 2 emojis total
+`;
+}
+
+function buildRefineUserPrompt(patient, draft) {
+  const stage = getReminderStage(patient);
+
+  let stageHint = "";
+  if (stage === 0) stageHint = "This is the first message after photos were received.";
+  else if (stage === 1) stageHint = "This is the first follow-up after no reply.";
+  else if (stage === 2) stageHint = "This is the second follow-up.";
+  else stageHint = "This is the third or later follow-up.";
+
+  return `
+Patient name: ${getPatientName(patient)}
+${stageHint}
+
+Draft message:
+${draft}
+
+Refine this so it sounds more human, more natural, and more persuasive, while staying short and professional.
+`;
+}
+
+async function generateDraftWithOpenAI(patient) {
   if (!openai) {
     throw new Error("OPENAI_API_KEY missing");
   }
@@ -143,16 +186,15 @@ async function generateWithOpenAI(patient) {
     model: env.OPENAI_MODEL || "gpt-5.4-mini",
     temperature: 0.8,
     messages: [
-      { role: "system", content: buildSystemPrompt() },
-      { role: "user", content: buildUserPrompt(patient) }
+      { role: "system", content: buildDraftSystemPrompt() },
+      { role: "user", content: buildDraftUserPrompt(patient) }
     ]
   });
 
-  const text = response.choices?.[0]?.message?.content || "";
-  return cleanText(text);
+  return cleanText(response.choices?.[0]?.message?.content || "");
 }
 
-async function generateWithAnthropic(patient) {
+async function refineWithClaude(patient, draft) {
   if (!anthropic) {
     throw new Error("ANTHROPIC_API_KEY missing");
   }
@@ -161,80 +203,80 @@ async function generateWithAnthropic(patient) {
     model: env.ANTHROPIC_MODEL || "claude-sonnet-4-6",
     max_tokens: 300,
     temperature: 0.8,
-    system: buildSystemPrompt(),
+    system: buildRefineSystemPrompt(),
     messages: [
       {
         role: "user",
-        content: buildUserPrompt(patient)
+        content: buildRefineUserPrompt(patient, draft)
       }
     ]
   });
 
-  const text = response.content?.[0]?.text || "";
-  return cleanText(text);
+  return cleanText(response.content?.[0]?.text || "");
 }
 
-async function generatePatientMessage(patient) {
-  let generatedMessage = "";
+function buildFallbackMessage(patient) {
+  const name = getPatientName(patient);
+  const stage = getReminderStage(patient);
 
-  try {
-    if (anthropic) {
-      generatedMessage = await generateWithAnthropic(patient);
-    } else if (openai) {
-      generatedMessage = await generateWithOpenAI(patient);
-    } else {
-      throw new Error("No AI provider configured");
-    }
-  } catch (primaryError) {
-    console.error("Primary AI provider failed:", primaryError.message || primaryError);
-
-    if (!generatedMessage) {
-      try {
-        if (openai) {
-          generatedMessage = await generateWithOpenAI(patient);
-        } else if (anthropic) {
-          generatedMessage = await generateWithAnthropic(patient);
-        }
-      } catch (fallbackError) {
-        console.error("Fallback AI provider failed:", fallbackError.message || fallbackError);
-      }
-    }
-  }
-
-  if (!generatedMessage) {
-    const name = getPatientName(patient);
-    const stage = getReminderStage(patient);
-
-    if (stage === 0) {
-      generatedMessage = `Ciao ${name} 👋
+  if (stage === 0) {
+    return `Ciao ${name} 👋
 
 Abbiamo ricevuto le tue foto e stiamo valutando il tuo caso con attenzione.
 
 Ti aggiorno appena la valutazione è pronta, così posso spiegarti il piano più adatto a te.`;
-    } else if (stage === 1) {
-      generatedMessage = `Ciao ${name} 👋
+  }
 
-Volevo solo ricontattarti perché stiamo seguendo il tuo caso con attenzione.
+  if (stage === 1) {
+    return `Ciao ${name} 👋
 
-Se vuoi, ti aggiorno io sul prossimo passo.`;
-    } else if (stage === 2) {
-      generatedMessage = `Ciao ${name} 👋
+Volevo ricontattarti perché stiamo seguendo il tuo caso con attenzione.
 
-Ti scrivo perché possiamo aiutarti a organizzare il prossimo passo in modo semplice e chiaro.
+Se vuoi, ti aggiorno io direttamente sul prossimo passo.`;
+  }
 
-Se vuoi, ti spiego tutto io direttamente qui.`;
-    } else {
-      generatedMessage = `Ciao ${name} 👋
+  if (stage === 2) {
+    return `Ciao ${name} 👋
 
-Se vuoi procedere, questo è un buon momento per organizzare tutto con calma e senza complicazioni.
+Se vuoi, possiamo già organizzare il prossimo passo in modo semplice e chiaro.
+
+Ti aiuto io direttamente qui, senza complicazioni.`;
+  }
+
+  return `Ciao ${name} 👋
+
+Se vuoi procedere, questo è un buon momento per organizzare tutto con calma e in modo chiaro.
 
 Scrivimi pure e ti aiuto io passo dopo passo.`;
-    }
+}
+
+async function generatePatientMessage(patient) {
+  let draftMessage = "";
+  let finalMessage = "";
+
+  try {
+    draftMessage = await generateDraftWithOpenAI(patient);
+  } catch (error) {
+    console.error("OpenAI draft generation failed:", error.message || error);
+  }
+
+  if (!draftMessage) {
+    draftMessage = buildFallbackMessage(patient);
+  }
+
+  try {
+    finalMessage = await refineWithClaude(patient, draftMessage);
+  } catch (error) {
+    console.error("Claude refinement failed:", error.message || error);
+  }
+
+  if (!finalMessage) {
+    finalMessage = draftMessage;
   }
 
   return {
-    generatedMessage,
-    finalMessage: generatedMessage
+    generatedMessage: draftMessage,
+    finalMessage: finalMessage
   };
 }
 
