@@ -41,11 +41,6 @@ function now() {
   return new Date();
 }
 
-/**
- * Sheet stores Turkey local time in format:
- * YYYY-MM-DD HH:mm:ss
- * We convert it manually to UTC Date so comparisons work correctly on Railway.
- */
 function parseSheetDateTime(datetime) {
   if (!datetime) return null;
 
@@ -65,7 +60,7 @@ function parseSheetDateTime(datetime) {
   const minute = Number(match[5]);
   const second = Number(match[6]);
 
-  // Istanbul = UTC+3
+  // Europe/Istanbul = UTC+3
   const utcMillis = Date.UTC(year, month - 1, day, hour - 3, minute, second);
   const parsed = new Date(utcMillis);
 
@@ -212,14 +207,22 @@ async function appendStatusHistory(data) {
   }
 }
 
-function getReminderMinutes(counter, settings) {
-  const reminder1 = Number(settings.reminder_1_minutes || 60);
-  const reminder2 = Number(settings.reminder_2_minutes || 120);
-  const reminder3 = Number(settings.reminder_3_minutes || 150);
+/**
+ * Absolute reminder schedule from FIRST send:
+ * counter 1 => + reminder_1_minutes
+ * counter 2 => + reminder_2_minutes
+ * counter 3+ => + reminder_3_minutes
+ */
+function getAbsoluteReminderMinutes(counter, settings) {
+  const r1 = Number(settings.reminder_1_minutes || 60);
+  const r2 = Number(settings.reminder_2_minutes || 120);
+  const r3 = Number(settings.reminder_3_minutes || 150);
 
-  if (counter <= 1) return reminder1;
-  if (counter === 2) return reminder2;
-  return reminder3;
+  if (counter === 1) return r1;
+  if (counter === 2) return r2;
+  if (counter >= 3) return r3;
+
+  return r1;
 }
 
 async function markSent(patient, headers, settings, finalMessage) {
@@ -242,9 +245,13 @@ async function markSent(patient, headers, settings, finalMessage) {
 
   const count = Number(patient[countKey] || 0);
   const stalled = Number(patient[stalledKey] || 0) + 1;
-  const minutes = getReminderMinutes(stalled, settings);
-  const currentTime = now();
-  const nextDate = addMinutes(currentTime, minutes);
+
+  const firstSentTime = patient[lastAgentKey]
+    ? parseSheetDateTime(patient[lastAgentKey]) || new Date()
+    : new Date();
+
+  const minutes = getAbsoluteReminderMinutes(stalled, settings);
+  const nextDate = addMinutes(firstSentTime, minutes);
 
   await updateRow(patient.rowNumber, {
     [statusKey]: settings.status_after_send || "contacted",
@@ -253,17 +260,17 @@ async function markSent(patient, headers, settings, finalMessage) {
     [activeKey]: "TRUE",
     [actionKey]: "wait_patient_reply",
     [followKey]: formatDate(nextDate),
-    [lastAgentKey]: formatDate(currentTime),
+    [lastAgentKey]: patient[lastAgentKey] || formatDate(firstSentTime),
     [generatedKey]: patient[generatedKey] || "",
     [finalKey]: finalMessage,
     [stalledKey]: String(stalled),
     [countKey]: String(count + 1),
     [alertKey]: "",
-    [updatedAtKey]: formatDate(currentTime)
+    [updatedAtKey]: formatDate(new Date())
   });
 
   await appendMessageLog({
-    timestamp: formatDate(currentTime),
+    timestamp: formatDate(new Date()),
     patient_id: patient.patient_id || "",
     rowNumber: patient.rowNumber,
     channel: "telegram_action",
@@ -274,7 +281,7 @@ async function markSent(patient, headers, settings, finalMessage) {
   });
 
   await appendStatusHistory({
-    timestamp: formatDate(currentTime),
+    timestamp: formatDate(new Date()),
     patient_id: patient.patient_id || "",
     rowNumber: patient.rowNumber,
     old_status: oldStatus,
@@ -303,6 +310,6 @@ module.exports = {
   findHeader,
   formatDate,
   addMinutes,
-  getReminderMinutes,
-  parseSheetDateTime
+  parseSheetDateTime,
+  getAbsoluteReminderMinutes
 };
