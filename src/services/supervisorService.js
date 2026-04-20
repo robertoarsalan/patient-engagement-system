@@ -7,10 +7,6 @@ const state = {
   alertsSent: new Map()
 };
 
-function nowIso() {
-  return new Date().toISOString();
-}
-
 function makeAlertKey(type, detail) {
   return `${type}::${detail}`;
 }
@@ -33,6 +29,30 @@ function shouldThrottle(type, detail, windowMs = 15 * 60 * 1000) {
   return true;
 }
 
+function isTransientAbort(error) {
+  const msg = String(error?.message || "").toLowerCase();
+  const code = error?.code;
+  const status = error?.response?.status;
+
+  return (
+    msg.includes("operation was aborted") ||
+    msg.includes("request aborted") ||
+    msg.includes("timeout") ||
+    msg.includes("deadline") ||
+    msg.includes("socket hang up") ||
+    msg.includes("econnreset") ||
+    msg.includes("etimedout") ||
+    code === "ECONNRESET" ||
+    code === "ETIMEDOUT" ||
+    code === 429 ||
+    status === 429 ||
+    status === 500 ||
+    status === 502 ||
+    status === 503 ||
+    status === 504
+  );
+}
+
 async function notifySupervisor(title, details) {
   const text = `🚨 Supervisor Alert
 
@@ -52,6 +72,11 @@ ${details}`;
 }
 
 async function notifyError(source, error) {
+  if (isTransientAbort(error)) {
+    console.warn(`Transient error suppressed from supervisor: ${source} -> ${error.message || error}`);
+    return;
+  }
+
   const message = error?.stack || error?.message || String(error || "Unknown error");
 
   if (shouldThrottle("error", `${source}:${message.slice(0, 120)}`)) {

@@ -9,6 +9,59 @@ const SETTINGS_SHEET = "settings";
 const PATIENTS_RANGE_END = "AO";
 const AUTO_RESET_THRESHOLD = 500;
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRetryableGoogleError(error) {
+  const msg = String(error?.message || "").toLowerCase();
+  const code = error?.code;
+  const status = error?.response?.status;
+
+  return (
+    msg.includes("operation was aborted") ||
+    msg.includes("request aborted") ||
+    msg.includes("timeout") ||
+    msg.includes("deadline") ||
+    msg.includes("socket hang up") ||
+    msg.includes("econnreset") ||
+    msg.includes("etimedout") ||
+    code === "ECONNRESET" ||
+    code === "ETIMEDOUT" ||
+    code === 429 ||
+    status === 429 ||
+    status === 500 ||
+    status === 502 ||
+    status === 503 ||
+    status === 504
+  );
+}
+
+async function withGoogleRetry(fn, label = "google_request", maxAttempts = 4) {
+  let lastError;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+
+      if (!isRetryableGoogleError(error) || attempt === maxAttempts) {
+        throw error;
+      }
+
+      const delay = attempt * 1500;
+      console.warn(
+        `[${label}] Google request failed on attempt ${attempt}/${maxAttempts}. Retrying in ${delay}ms...`,
+        error.message || error
+      );
+      await sleep(delay);
+    }
+  }
+
+  throw lastError;
+}
+
 function getSheetsClient() {
   const auth = new google.auth.GoogleAuth({
     credentials: {
@@ -93,10 +146,14 @@ function findHeader(headers, key) {
 async function getSheetData() {
   const sheets = getSheetsClient();
 
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: env.GOOGLE_SHEET_ID,
-    range: `${SHEET_NAME}!A:${PATIENTS_RANGE_END}`
-  });
+  const res = await withGoogleRetry(
+    () =>
+      sheets.spreadsheets.values.get({
+        spreadsheetId: env.GOOGLE_SHEET_ID,
+        range: `${SHEET_NAME}!A:${PATIENTS_RANGE_END}`
+      }),
+    "getSheetData"
+  );
 
   const rows = res.data.values || [];
   if (!rows.length) return { headers: [], patients: [] };
@@ -110,10 +167,14 @@ async function getSheetData() {
 async function getSettings() {
   const sheets = getSheetsClient();
 
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: env.GOOGLE_SHEET_ID,
-    range: `${SETTINGS_SHEET}!A:B`
-  });
+  const res = await withGoogleRetry(
+    () =>
+      sheets.spreadsheets.values.get({
+        spreadsheetId: env.GOOGLE_SHEET_ID,
+        range: `${SETTINGS_SHEET}!A:B`
+      }),
+    "getSettings"
+  );
 
   const rows = res.data.values || [];
   const map = {};
@@ -131,11 +192,15 @@ async function updateRow(rowNumber, updates) {
   const sheets = getSheetsClient();
   const { headers } = await getSheetData();
 
-  const currentRowRes = await sheets.spreadsheets.values.get({
-    spreadsheetId: env.GOOGLE_SHEET_ID,
-    range: `${SHEET_NAME}!A${rowNumber}:${PATIENTS_RANGE_END}${rowNumber}`,
-    valueRenderOption: "FORMULA"
-  });
+  const currentRowRes = await withGoogleRetry(
+    () =>
+      sheets.spreadsheets.values.get({
+        spreadsheetId: env.GOOGLE_SHEET_ID,
+        range: `${SHEET_NAME}!A${rowNumber}:${PATIENTS_RANGE_END}${rowNumber}`,
+        valueRenderOption: "FORMULA"
+      }),
+    "updateRow.getCurrentRow"
+  );
 
   const currentRow = currentRowRes.data.values?.[0] || [];
   const mergedRow = new Array(headers.length).fill("");
@@ -149,61 +214,73 @@ async function updateRow(rowNumber, updates) {
     }
   }
 
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: env.GOOGLE_SHEET_ID,
-    range: `${SHEET_NAME}!A${rowNumber}:${PATIENTS_RANGE_END}${rowNumber}`,
-    valueInputOption: "USER_ENTERED",
-    requestBody: {
-      values: [mergedRow]
-    }
-  });
+  await withGoogleRetry(
+    () =>
+      sheets.spreadsheets.values.update({
+        spreadsheetId: env.GOOGLE_SHEET_ID,
+        range: `${SHEET_NAME}!A${rowNumber}:${PATIENTS_RANGE_END}${rowNumber}`,
+        valueInputOption: "USER_ENTERED",
+        requestBody: {
+          values: [mergedRow]
+        }
+      }),
+    "updateRow.writeRow"
+  );
 }
 
 async function appendMessageLog(data) {
   const sheets = getSheetsClient();
 
-  await sheets.spreadsheets.values.append({
-    spreadsheetId: env.GOOGLE_SHEET_ID,
-    range: `${MESSAGE_LOG_SHEET}!A:H`,
-    valueInputOption: "USER_ENTERED",
-    insertDataOption: "INSERT_ROWS",
-    requestBody: {
-      values: [[
-        data.timestamp,
-        data.patient_id,
-        data.rowNumber,
-        data.channel,
-        data.direction,
-        data.message_type,
-        data.content,
-        data.status
-      ]]
-    }
-  });
+  await withGoogleRetry(
+    () =>
+      sheets.spreadsheets.values.append({
+        spreadsheetId: env.GOOGLE_SHEET_ID,
+        range: `${MESSAGE_LOG_SHEET}!A:H`,
+        valueInputOption: "USER_ENTERED",
+        insertDataOption: "INSERT_ROWS",
+        requestBody: {
+          values: [[
+            data.timestamp,
+            data.patient_id,
+            data.rowNumber,
+            data.channel,
+            data.direction,
+            data.message_type,
+            data.content,
+            data.status
+          ]]
+        }
+      }),
+    "appendMessageLog"
+  );
 }
 
 async function appendStatusHistory(data) {
   const sheets = getSheetsClient();
 
   try {
-    await sheets.spreadsheets.values.append({
-      spreadsheetId: env.GOOGLE_SHEET_ID,
-      range: `${STATUS_HISTORY_SHEET}!A:H`,
-      valueInputOption: "USER_ENTERED",
-      insertDataOption: "INSERT_ROWS",
-      requestBody: {
-        values: [[
-          data.timestamp,
-          data.patient_id,
-          data.rowNumber,
-          data.old_status,
-          data.new_status,
-          data.old_sub_status,
-          data.new_sub_status,
-          data.reason
-        ]]
-      }
-    });
+    await withGoogleRetry(
+      () =>
+        sheets.spreadsheets.values.append({
+          spreadsheetId: env.GOOGLE_SHEET_ID,
+          range: `${STATUS_HISTORY_SHEET}!A:H`,
+          valueInputOption: "USER_ENTERED",
+          insertDataOption: "INSERT_ROWS",
+          requestBody: {
+            values: [[
+              data.timestamp,
+              data.patient_id,
+              data.rowNumber,
+              data.old_status,
+              data.new_status,
+              data.old_sub_status,
+              data.new_sub_status,
+              data.reason
+            ]]
+          }
+        }),
+      "appendStatusHistory"
+    );
   } catch (error) {
     console.error("Status history append failed:", error.message || error);
   }
@@ -314,10 +391,14 @@ async function markSent(patient, headers, settings, finalMessage) {
 async function resetPatientsSheetIfThresholdReached() {
   const sheets = getSheetsClient();
 
-  const valuesRes = await sheets.spreadsheets.values.get({
-    spreadsheetId: env.GOOGLE_SHEET_ID,
-    range: `${SHEET_NAME}!A:${PATIENTS_RANGE_END}`
-  });
+  const valuesRes = await withGoogleRetry(
+    () =>
+      sheets.spreadsheets.values.get({
+        spreadsheetId: env.GOOGLE_SHEET_ID,
+        range: `${SHEET_NAME}!A:${PATIENTS_RANGE_END}`
+      }),
+    "resetPatientsSheetIfThresholdReached.readSheet"
+  );
 
   const rows = valuesRes.data.values || [];
   if (rows.length <= 1) {
@@ -346,11 +427,15 @@ async function resetPatientsSheetIfThresholdReached() {
 
   console.log(`Patients threshold reached (${filledCount}). Resetting patient rows while preserving formulas...`);
 
-  const formulaRes = await sheets.spreadsheets.values.get({
-    spreadsheetId: env.GOOGLE_SHEET_ID,
-    range: `${SHEET_NAME}!A2:${PATIENTS_RANGE_END}`,
-    valueRenderOption: "FORMULA"
-  });
+  const formulaRes = await withGoogleRetry(
+    () =>
+      sheets.spreadsheets.values.get({
+        spreadsheetId: env.GOOGLE_SHEET_ID,
+        range: `${SHEET_NAME}!A2:${PATIENTS_RANGE_END}`,
+        valueRenderOption: "FORMULA"
+      }),
+    "resetPatientsSheetIfThresholdReached.readFormulas"
+  );
 
   const formulaRows = formulaRes.data.values || [];
   const cleanedRows = formulaRows.map((row) =>
@@ -364,14 +449,18 @@ async function resetPatientsSheetIfThresholdReached() {
   );
 
   if (cleanedRows.length > 0) {
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: env.GOOGLE_SHEET_ID,
-      range: `${SHEET_NAME}!A2:${PATIENTS_RANGE_END}${cleanedRows.length + 1}`,
-      valueInputOption: "USER_ENTERED",
-      requestBody: {
-        values: cleanedRows
-      }
-    });
+    await withGoogleRetry(
+      () =>
+        sheets.spreadsheets.values.update({
+          spreadsheetId: env.GOOGLE_SHEET_ID,
+          range: `${SHEET_NAME}!A2:${PATIENTS_RANGE_END}${cleanedRows.length + 1}`,
+          valueInputOption: "USER_ENTERED",
+          requestBody: {
+            values: cleanedRows
+          }
+        }),
+      "resetPatientsSheetIfThresholdReached.writeReset"
+    );
   }
 
   console.log("Patients sheet reset complete.");
