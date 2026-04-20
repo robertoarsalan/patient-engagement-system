@@ -107,6 +107,17 @@ function toBoolSafe(value) {
   return String(value || "").trim().toLowerCase() === "true";
 }
 
+function isStaleTaskButton(callbackQuery, patient, telegramLastAlertValue) {
+  const clickedMessageId = String(callbackQuery?.message?.message_id || "");
+  const activeMessageId = String(telegramLastAlertValue || "");
+
+  if (!activeMessageId) {
+    return true;
+  }
+
+  return clickedMessageId !== activeMessageId;
+}
+
 app.get("/", (req, res) => {
   res.send("Patient engagement backend is running");
 });
@@ -175,6 +186,27 @@ app.post("/telegram-webhook", async (req, res) => {
       const callPendingInputKey = findHeader(headers, "call_pending_input");
       const callReminderAtKey = findHeader(headers, "call_reminder_at");
       const callReminderActiveKey = findHeader(headers, "call_reminder_active");
+
+      const actionsNeedingFreshTaskCard = new Set([
+        "message",
+        "call",
+        "regen",
+        "done",
+        "snooze15",
+        "hot"
+      ]);
+
+      if (actionsNeedingFreshTaskCard.has(action)) {
+        const stale = isStaleTaskButton(callbackQuery, patient, patient[telegramLastAlertKey]);
+
+        if (stale) {
+          await answerCallbackQuery(
+            callbackQueryId,
+            "This is an old task card. Use the latest notification."
+          );
+          return res.json({ ok: true });
+        }
+      }
 
       if (action === "message") {
         try {

@@ -7,6 +7,7 @@ const {
   findHeader,
   updateRow,
   formatDate,
+  parseSheetDateTime,
   resetPatientsSheetIfThresholdReached
 } = require("../services/sheetService");
 const { generatePatientMessage } = require("../services/aiService");
@@ -19,9 +20,23 @@ const {
 
 let isRunning = false;
 
+const STALE_ALERT_LOCK_MINUTES = 15;
+
 function getLast4(phone) {
   const digits = String(phone || "").replace(/\D/g, "");
   return digits.slice(-4) || "----";
+}
+
+function isAlertLockStale(updatedAtValue) {
+  if (!updatedAtValue) return true;
+
+  const parsed = parseSheetDateTime(updatedAtValue);
+  if (!parsed) return true;
+
+  const diffMs = Date.now() - parsed.getTime();
+  const diffMin = diffMs / 60000;
+
+  return diffMin >= STALE_ALERT_LOCK_MINUTES;
 }
 
 async function checkCallReminders() {
@@ -96,6 +111,7 @@ async function checkDueTasks() {
     const status = String(patient[statusKey] || "").trim();
     const subStatus = String(patient[subStatusKey] || "").trim();
     const taskType = String(patient[taskTypeKey] || "").trim();
+    const updatedAt = patient[updatedAtKey];
 
     const due = isDue(nextFollowupAt);
 
@@ -116,8 +132,37 @@ async function checkDueTasks() {
     if (!currentTaskActive) continue;
     if (!hasValue(nextFollowupAt)) continue;
     if (!due) continue;
-    if (hasValue(telegramLastAlertId)) continue;
     if (nextAction !== "wait_patient_reply") continue;
+
+    let shouldSend = true;
+
+    if (hasValue(telegramLastAlertId)) {
+      const stale = isAlertLockStale(updatedAt);
+
+      if (!stale) {
+        shouldSend = false;
+      } else {
+        console.warn(
+          `Stale telegram_last lock detected for row ${patient.rowNumber}. Clearing lock and resending reminder.`
+        );
+
+        try {
+          await updateRow(patient.rowNumber, {
+            [alertKey]: "",
+            [updatedAtKey]: formatDate(new Date())
+          });
+        } catch (error) {
+          console.error(
+            `Failed to clear stale alert lock for row ${patient.rowNumber}:`,
+            error.response?.data || error.message || error
+          );
+          await notifyError("pollSheetJob.clearStaleAlertLock", error);
+          shouldSend = false;
+        }
+      }
+    }
+
+    if (!shouldSend) continue;
 
     dueCount++;
 
