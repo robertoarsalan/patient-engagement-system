@@ -14,7 +14,9 @@ const { sendPatientTaskCard, sendTelegramMessage } = require("../services/telegr
 const {
   notifyError,
   markPollingSuccess,
-  markPollingError
+  markPollingError,
+  recordFollowUpTriggered,
+  recordCallReminderTriggered
 } = require("../services/supervisorService");
 
 let isRunning = false;
@@ -59,6 +61,7 @@ async function checkCallReminders() {
         [updatedAtKey]: formatDate(new Date())
       });
 
+      recordCallReminderTriggered();
       console.log(`Call reminder sent for row ${patient.rowNumber}`);
     } catch (error) {
       console.error(
@@ -94,18 +97,6 @@ async function checkDueTasks() {
     const taskType = String(patient[taskTypeKey] || "").trim();
     const due = isDue(nextFollowupAt);
 
-    console.log("Due check:", {
-      rowNumber: patient.rowNumber,
-      patient_id: patient.patient_id || "",
-      full_name: patient.full_name || "",
-      currentTaskActive,
-      nextFollowupAt,
-      telegramLastAlertId,
-      nextAction,
-      taskType,
-      due
-    });
-
     if (!currentTaskActive) continue;
     if (!hasValue(nextFollowupAt)) continue;
     if (!due) continue;
@@ -113,8 +104,6 @@ async function checkDueTasks() {
     if (hasValue(telegramLastAlertId)) continue;
 
     dueCount++;
-
-    console.log(`Due follow-up found for row ${patient.rowNumber} (${patient.patient_id || ""})`);
 
     try {
       const aiResult = await generatePatientMessage({
@@ -144,6 +133,7 @@ async function checkDueTasks() {
         [updatedAtKey]: formatDate(new Date())
       });
 
+      recordFollowUpTriggered();
       console.log(`Follow-up Telegram task sent for row ${patient.rowNumber}`);
     } catch (error) {
       console.error(
@@ -182,7 +172,6 @@ async function runPollingCycle() {
         await notifyError("pollSheetJob.preResetNotification", error);
       }
 
-      console.log(`Patients sheet auto-reset completed at threshold ${resetResult.filledCount}.`);
       markPollingSuccess();
       return;
     }

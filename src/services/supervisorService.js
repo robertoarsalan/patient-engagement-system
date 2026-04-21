@@ -312,7 +312,6 @@ async function sendDailySummaryIfNeeded() {
   const todayKey = getTurkeyDateKey();
   const summaryKey = `daily-summary-${todayKey}`;
 
-  // send once a day around 21:00 TR
   if (currentHour !== 21 || currentMinute > 10) {
     return;
   }
@@ -334,6 +333,30 @@ async function sendDailySummaryIfNeeded() {
 ✅ Last polling success: ${
       state.lastPollingSuccessAt
         ? new Date(state.lastPollingSuccessAt).toLocaleString("en-GB", {
+            timeZone: process.env.TIMEZONE || "Europe/Istanbul",
+            hour12: false
+          }) + " (TR time)"
+        : "never"
+    }
+✅ Last Telegram success: ${
+      state.lastTelegramSuccessAt
+        ? new Date(state.lastTelegramSuccessAt).toLocaleString("en-GB", {
+            timeZone: process.env.TIMEZONE || "Europe/Istanbul",
+            hour12: false
+          }) + " (TR time)"
+        : "never"
+    }
+✅ Last Sheets success: ${
+      state.lastSheetsSuccessAt
+        ? new Date(state.lastSheetsSuccessAt).toLocaleString("en-GB", {
+            timeZone: process.env.TIMEZONE || "Europe/Istanbul",
+            hour12: false
+          }) + " (TR time)"
+        : "never"
+    }
+✅ Last AI success: ${
+      state.lastAiSuccessAt
+        ? new Date(state.lastAiSuccessAt).toLocaleString("en-GB", {
             timeZone: process.env.TIMEZONE || "Europe/Istanbul",
             hour12: false
           }) + " (TR time)"

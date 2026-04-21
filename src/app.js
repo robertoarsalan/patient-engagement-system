@@ -19,7 +19,8 @@ const {
 const {
   notifyError,
   startSupervisor,
-  installGlobalErrorHandlers
+  installGlobalErrorHandlers,
+  recordMessageMarkedSent
 } = require("./services/supervisorService");
 
 const app = express();
@@ -60,7 +61,6 @@ function buildTurkeyDate(year, month, day, hour, minute, second = 0) {
 function parseCallReminderInput(text) {
   const raw = String(text || "").trim();
 
-  // YYYY-MM-DD HH:mm
   let full = raw.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})$/);
   if (full) {
     const year = Number(full[1]);
@@ -71,7 +71,6 @@ function parseCallReminderInput(text) {
     return buildTurkeyDate(year, month, day, hour, minute, 0);
   }
 
-  // HH:mm
   const short = raw.match(/^(\d{2}):(\d{2})$/);
   if (short) {
     const trNow = getTurkeyNowDate();
@@ -163,9 +162,6 @@ app.post("/telegram-webhook", async (req, res) => {
   try {
     const body = req.body || {};
 
-    // =========================
-    // CALLBACK BUTTON HANDLER
-    // =========================
     if (body.callback_query) {
       const callbackQuery = body.callback_query;
       const callbackData = callbackQuery.data || "";
@@ -173,8 +169,6 @@ app.post("/telegram-webhook", async (req, res) => {
 
       const [action, rowNumberRaw] = callbackData.split(":");
       const rowNumber = Number(rowNumberRaw);
-
-      console.log("Button clicked:", callbackData);
 
       const { headers, patients } = await getSheetData();
       const patient = patients.find((p) => Number(p.rowNumber) === rowNumber);
@@ -249,6 +243,8 @@ app.post("/telegram-webhook", async (req, res) => {
           const refreshedPatient = refreshedData.patients.find(
             (p) => Number(p.rowNumber) === rowNumber
           );
+
+          recordMessageMarkedSent();
 
           await sendTelegramMessage(
             `✅ Message marked as sent for row ${rowNumber}
@@ -451,9 +447,6 @@ YYYY-MM-DD HH:mm`
       return res.json({ ok: true });
     }
 
-    // =========================
-    // TEXT INPUT HANDLER
-    // =========================
     if (body.message && body.message.text) {
       const messageText = String(body.message.text || "").trim();
 

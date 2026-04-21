@@ -1,6 +1,7 @@
 const OpenAI = require("openai");
 const Anthropic = require("@anthropic-ai/sdk");
 const env = require("../config/env");
+const { markAiSuccess } = require("./supervisorService");
 
 const openai = env.OPENAI_API_KEY
   ? new OpenAI({ apiKey: env.OPENAI_API_KEY })
@@ -131,20 +132,12 @@ Goal:
 - do not pressure
 - do not ask for a videocall yet
 - this should sound personal and human
-
-Intent example:
-"Hello name, I just wanted to let you know your case is still in the evaluation phase. I wanted to give you a quick update."
-But write a better, more natural version in Italian.
 `;
   }
 
   if (stage === 1) {
     return `
 This is the SECOND message.
-
-Timing context:
-- It comes later while the patient is still waiting
-- The evaluation is almost done
 
 Goal:
 - say the evaluation is almost finished
@@ -153,36 +146,18 @@ Goal:
 - the question must be light, natural, and low-pressure
 - do not ask for a videocall yet
 - create gentle engagement and get a reply
-
-Examples of calibrated question style:
-- "Così posso regolarmi meglio, preferisci che ti aggiorni appena è tutto pronto?"
-- "Per capire come aiutarti meglio, preferisci ricevere tutto appena la valutazione è chiusa?"
-- "Così mi organizzo al meglio, ti è più comodo che ti aggiorni appena è tutto pronto?"
-
-Important:
-- only one short question
-- no pressure
-- must feel human
 `;
   }
 
   return `
 This is the THIRD message.
 
-Timing context:
-- The plan is ready
-
 Goal:
 - say the plan is ready
 - ask when the patient is available for a videocall
 - sound confident, human, calm
 - use a stronger next step
-- this is the clearest action-oriented message
 - do not sound aggressive
-
-Intent example:
-"Hello, the plan is ready. May I know when you are available to have a videocall?"
-But write a more natural, persuasive Italian version.
 `;
 }
 
@@ -305,7 +280,9 @@ async function generateDraftWithOpenAI(patient) {
     ]
   });
 
-  return cleanText(response.choices?.[0]?.message?.content || "");
+  const text = cleanText(response.choices?.[0]?.message?.content || "");
+  markAiSuccess();
+  return text;
 }
 
 async function refineWithClaude(patient, draft) {
@@ -326,8 +303,9 @@ async function refineWithClaude(patient, draft) {
     ]
   });
 
-  const text = response.content?.[0]?.text || "";
-  return cleanText(text);
+  const text = cleanText(response.content?.[0]?.text || "");
+  markAiSuccess();
+  return text;
 }
 
 function buildFallbackMessage(patient) {

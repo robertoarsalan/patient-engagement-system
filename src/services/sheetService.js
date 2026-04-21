@@ -1,6 +1,7 @@
 const { google } = require("googleapis");
 const env = require("../config/env");
 const { formatDate, addMinutes } = require("../utils/time");
+const { markSheetsSuccess } = require("./supervisorService");
 
 const SHEET_NAME = "patients";
 const MESSAGE_LOG_SHEET = "message_log";
@@ -42,7 +43,9 @@ async function withGoogleRetry(fn, label = "google_request", maxAttempts = 4) {
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      return await fn();
+      const result = await fn();
+      markSheetsSuccess();
+      return result;
     } catch (error) {
       lastError = error;
 
@@ -109,7 +112,6 @@ function parseSheetDateTime(datetime) {
     const hour = Number(match[4]);
     const minute = Number(match[5]);
     const second = Number(match[6] || 0);
-
     return new Date(Date.UTC(year, month - 1, day, hour - 3, minute, second));
   }
 
@@ -124,7 +126,6 @@ function parseSheetDateTime(datetime) {
     const hour = Number(match[4]);
     const minute = Number(match[5]);
     const second = Number(match[6] || 0);
-
     return new Date(Date.UTC(year, month - 1, day, hour - 3, minute, second));
   }
 
@@ -167,7 +168,6 @@ function isDateHeader(header) {
     "created_at",
     "updated_at",
     "call_reminder_at",
-    "workflow_started_at",
     "workflow_started_at"
   ].includes(header);
 }
@@ -329,20 +329,12 @@ async function appendStatusHistory(data) {
 
 function getMixedReminderPlan(counter, settings, firstSentTime, currentSendTime) {
   const r1 = Number(settings.reminder_1_minutes || 60);
-  const r2 = Number(settings.reminder_2_minutes || 210); // 1h + 2.5h after second notification flow target
   const r3 = Number(settings.reminder_3_minutes || 150);
 
   if (counter === 1) {
     return {
       minutes: r1,
       nextDate: addMinutes(firstSentTime, r1)
-    };
-  }
-
-  if (counter === 2) {
-    return {
-      minutes: r3,
-      nextDate: addMinutes(currentSendTime, r3)
     };
   }
 
@@ -375,7 +367,6 @@ async function markSent(patient, headers, settings, finalMessage) {
   const stalled = Number(patient[stalledKey] || 0) + 1;
 
   const currentSendTime = new Date();
-
   const firstSentTime = patient[workflowStartedAtKey]
     ? parseSheetDateTime(patient[workflowStartedAtKey]) || currentSendTime
     : currentSendTime;
