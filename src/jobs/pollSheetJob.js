@@ -75,13 +75,11 @@ async function checkDueTasks() {
 
   const activeKey = findHeader(headers, "current_task_active");
   const followupKey = findHeader(headers, "next_followup_at");
-  const alertKey = findHeader(headers, "telegram_last");
+  const alertKey = findHeader(headers, "telegram_last_alert_id");
   const generatedKey = findHeader(headers, "last_generated_message");
   const finalKey = findHeader(headers, "last_final_message");
   const updatedAtKey = findHeader(headers, "updated_at");
   const actionKey = findHeader(headers, "next_action");
-  const statusKey = findHeader(headers, "status");
-  const subStatusKey = findHeader(headers, "sub_status");
   const taskTypeKey = findHeader(headers, "current_task_type");
 
   console.log("Checking sheet for due tasks...");
@@ -93,10 +91,7 @@ async function checkDueTasks() {
     const nextFollowupAt = patient[followupKey];
     const telegramLastAlertId = patient[alertKey];
     const nextAction = String(patient[actionKey] || "").trim();
-    const status = String(patient[statusKey] || "").trim();
-    const subStatus = String(patient[subStatusKey] || "").trim();
     const taskType = String(patient[taskTypeKey] || "").trim();
-
     const due = isDue(nextFollowupAt);
 
     console.log("Due check:", {
@@ -107,8 +102,6 @@ async function checkDueTasks() {
       nextFollowupAt,
       telegramLastAlertId,
       nextAction,
-      status,
-      subStatus,
       taskType,
       due
     });
@@ -118,23 +111,16 @@ async function checkDueTasks() {
     if (!due) continue;
     if (nextAction !== "wait_patient_reply") continue;
 
+    // VERY IMPORTANT:
+    // if an alert ID already exists, it means reminder was already sent.
+    // Do NOT resend again every cycle.
+    if (hasValue(telegramLastAlertId)) continue;
+
     dueCount++;
 
     console.log(`Due follow-up found for row ${patient.rowNumber} (${patient.patient_id || ""})`);
 
     try {
-      /**
-       * IMPORTANT:
-       * The moment a reminder is due, we always rotate to a fresh task card.
-       * This prevents old telegram_last locks from blocking reminders.
-       */
-      if (hasValue(telegramLastAlertId)) {
-        await updateRow(patient.rowNumber, {
-          [alertKey]: "",
-          [updatedAtKey]: formatDate(new Date())
-        });
-      }
-
       const aiResult = await generatePatientMessage({
         ...patient,
         [taskTypeKey]: "follow_up"
