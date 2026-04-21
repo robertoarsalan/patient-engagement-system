@@ -1,5 +1,3 @@
-const { sendTelegramMessage } = require("./telegramService");
-
 const state = {
   lastPollingSuccessAt: null,
   lastPollingErrorAt: null,
@@ -226,6 +224,7 @@ async function notifySupervisor(title, details) {
 ${details}`;
 
   try {
+    const { sendTelegramMessage } = require("./telegramService");
     await sendTelegramMessage(text);
     state.lastTelegramSuccessAt = Date.now();
   } catch (error) {
@@ -328,40 +327,7 @@ async function sendDailySummaryIfNeeded() {
 💬 Messages marked sent: ${state.counters.messagesMarkedSentToday}
 🔁 Follow-ups triggered: ${state.counters.followUpsTriggeredToday}
 📞 Call reminders triggered: ${state.counters.callRemindersTriggeredToday}
-❌ Errors today: ${state.counters.errorsToday}
-
-✅ Last polling success: ${
-      state.lastPollingSuccessAt
-        ? new Date(state.lastPollingSuccessAt).toLocaleString("en-GB", {
-            timeZone: process.env.TIMEZONE || "Europe/Istanbul",
-            hour12: false
-          }) + " (TR time)"
-        : "never"
-    }
-✅ Last Telegram success: ${
-      state.lastTelegramSuccessAt
-        ? new Date(state.lastTelegramSuccessAt).toLocaleString("en-GB", {
-            timeZone: process.env.TIMEZONE || "Europe/Istanbul",
-            hour12: false
-          }) + " (TR time)"
-        : "never"
-    }
-✅ Last Sheets success: ${
-      state.lastSheetsSuccessAt
-        ? new Date(state.lastSheetsSuccessAt).toLocaleString("en-GB", {
-            timeZone: process.env.TIMEZONE || "Europe/Istanbul",
-            hour12: false
-          }) + " (TR time)"
-        : "never"
-    }
-✅ Last AI success: ${
-      state.lastAiSuccessAt
-        ? new Date(state.lastAiSuccessAt).toLocaleString("en-GB", {
-            timeZone: process.env.TIMEZONE || "Europe/Istanbul",
-            hour12: false
-          }) + " (TR time)"
-        : "never"
-    }`
+❌ Errors today: ${state.counters.errorsToday}`
   );
 }
 
