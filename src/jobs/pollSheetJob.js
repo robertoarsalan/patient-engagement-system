@@ -110,8 +110,6 @@ async function checkDueTasks() {
     if (!hasValue(nextFollowupAt)) continue;
     if (!due) continue;
     if (nextAction !== "wait_patient_reply") continue;
-
-    // if a current active reminder card already exists, do not resend every cycle
     if (hasValue(telegramLastAlertId)) continue;
 
     dueCount++;
@@ -189,13 +187,8 @@ async function runPollingCycle() {
       return;
     }
 
-    // 1) Immediate new patient notification
     await checkNewPatients();
-
-    // 2) Call reminders at exact time
     await checkCallReminders();
-
-    // 3) Follow-up reminders later
     await checkDueTasks();
 
     markPollingSuccess();

@@ -54,7 +54,6 @@ function getTurkeyNowDate() {
 }
 
 function buildTurkeyDate(year, month, day, hour, minute, second = 0) {
-  // Europe/Istanbul = UTC+3
   return new Date(Date.UTC(year, month - 1, day, hour - 3, minute, second));
 }
 
@@ -225,7 +224,6 @@ app.post("/telegram-webhook", async (req, res) => {
         }
       }
 
-      // -------- SEND MESSAGE --------
       if (action === "message") {
         try {
           const settings = await getSettings();
@@ -273,10 +271,8 @@ app.post("/telegram-webhook", async (req, res) => {
         }
       }
 
-      // -------- CALL PATIENT --------
       if (action === "call") {
         try {
-          // clear any old pending call input first
           for (const p of patients) {
             if (toBoolSafe(p[callPendingInputKey])) {
               await updateRow(p.rowNumber, {
@@ -286,7 +282,6 @@ app.post("/telegram-webhook", async (req, res) => {
             }
           }
 
-          // set current row as waiting for call time input
           await updateRow(patient.rowNumber, {
             [callPendingInputKey]: "TRUE",
             [callReminderActiveKey]: "FALSE",
@@ -321,7 +316,6 @@ YYYY-MM-DD HH:mm`
         }
       }
 
-      // -------- REGENERATE --------
       if (action === "regen") {
         try {
           const aiResult = await generatePatientMessage(patient);
@@ -357,7 +351,6 @@ YYYY-MM-DD HH:mm`
         }
       }
 
-      // -------- DONE --------
       if (action === "done") {
         try {
           await updateRow(patient.rowNumber, {
@@ -390,7 +383,6 @@ YYYY-MM-DD HH:mm`
         }
       }
 
-      // -------- SNOOZE --------
       if (action === "snooze15") {
         try {
           const nextDate = new Date(Date.now() + 15 * 60 * 1000);
@@ -423,7 +415,6 @@ YYYY-MM-DD HH:mm`
         }
       }
 
-      // -------- HOT --------
       if (action === "hot") {
         try {
           const existingNotes = patient[notesKey] || "";
