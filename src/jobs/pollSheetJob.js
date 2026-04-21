@@ -34,9 +34,7 @@ async function checkCallReminders() {
   const callPendingInputKey = findHeader(headers, "call_pending_input");
   const updatedAtKey = findHeader(headers, "updated_at");
 
-  if (!callReminderAtKey || !callReminderActiveKey) {
-    return;
-  }
+  if (!callReminderAtKey || !callReminderActiveKey) return;
 
   for (const patient of patients) {
     const active = toBool(patient[callReminderActiveKey]);
@@ -85,16 +83,11 @@ async function checkDueTasks() {
   const actionKey = findHeader(headers, "next_action");
   const taskTypeKey = findHeader(headers, "current_task_type");
 
-  console.log("Checking sheet for due tasks...");
-
-  let dueCount = 0;
-
   for (const patient of patients) {
     const currentTaskActive = toBool(patient[activeKey]);
     const nextFollowupAt = patient[followupKey];
     const telegramLastAlertId = patient[alertKey];
     const nextAction = String(patient[actionKey] || "").trim();
-    const taskType = String(patient[taskTypeKey] || "").trim();
     const due = isDue(nextFollowupAt);
 
     if (!currentTaskActive) continue;
@@ -102,8 +95,6 @@ async function checkDueTasks() {
     if (!due) continue;
     if (nextAction !== "wait_patient_reply") continue;
     if (hasValue(telegramLastAlertId)) continue;
-
-    dueCount++;
 
     try {
       const aiResult = await generatePatientMessage({
@@ -142,10 +133,6 @@ async function checkDueTasks() {
       );
       await notifyError("pollSheetJob.checkDueTasks", error);
     }
-  }
-
-  if (dueCount === 0) {
-    console.log("No due tasks right now.");
   }
 }
 

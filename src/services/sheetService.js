@@ -101,10 +101,7 @@ function parseSheetDateTime(datetime) {
   const raw = String(datetime).replace(/^'/, "").trim();
   if (!raw) return null;
 
-  let match = raw.match(
-    /^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?$/
-  );
-
+  let match = raw.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?$/);
   if (match) {
     const year = Number(match[1]);
     const month = Number(match[2]);
@@ -115,10 +112,7 @@ function parseSheetDateTime(datetime) {
     return new Date(Date.UTC(year, month - 1, day, hour - 3, minute, second));
   }
 
-  match = raw.match(
-    /^(\d{1,2})\/(\d{1,2})\/(\d{4})[ ,T]+(\d{1,2}):(\d{2})(?::(\d{2}))?$/
-  );
-
+  match = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})[ ,T]+(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
   if (match) {
     const month = Number(match[1]);
     const day = Number(match[2]);
@@ -185,7 +179,6 @@ function prepareCellValue(header, value) {
 
 async function getSheetData() {
   const sheets = getSheetsClient();
-
   const res = await withGoogleRetry(
     () =>
       sheets.spreadsheets.values.get({
@@ -206,7 +199,6 @@ async function getSheetData() {
 
 async function getSettings() {
   const sheets = getSheetsClient();
-
   const res = await withGoogleRetry(
     () =>
       sheets.spreadsheets.values.get({
@@ -247,7 +239,6 @@ async function updateRow(rowNumber, updates) {
 
   for (let i = 0; i < headers.length; i++) {
     const header = headers[i];
-
     if (updates[header] !== undefined) {
       mergedRow[i] = prepareCellValue(header, updates[header]);
     } else {
@@ -261,9 +252,7 @@ async function updateRow(rowNumber, updates) {
         spreadsheetId: env.GOOGLE_SHEET_ID,
         range: `${SHEET_NAME}!A${rowNumber}:${PATIENTS_RANGE_END}${rowNumber}`,
         valueInputOption: "USER_ENTERED",
-        requestBody: {
-          values: [mergedRow]
-        }
+        requestBody: { values: [mergedRow] }
       }),
     "updateRow.writeRow"
   );
@@ -327,20 +316,20 @@ async function appendStatusHistory(data) {
   }
 }
 
-function getMixedReminderPlan(counter, settings, firstSentTime, currentSendTime) {
-  const r1 = Number(settings.reminder_1_minutes || 60);
-  const r3 = Number(settings.reminder_3_minutes || 150);
+function getMixedReminderPlan(nextMessageCount, settings, currentSendTime) {
+  const firstDelay = Number(settings.reminder_1_minutes || 60);
+  const laterDelay = Number(settings.reminder_3_minutes || 150);
 
-  if (counter === 1) {
+  if (nextMessageCount === 1) {
     return {
-      minutes: r1,
-      nextDate: addMinutes(firstSentTime, r1)
+      minutes: firstDelay,
+      nextDate: addMinutes(currentSendTime, firstDelay)
     };
   }
 
   return {
-    minutes: r3,
-    nextDate: addMinutes(currentSendTime, r3)
+    minutes: laterDelay,
+    nextDate: addMinutes(currentSendTime, laterDelay)
   };
 }
 
@@ -363,20 +352,10 @@ async function markSent(patient, headers, settings, finalMessage) {
   const oldStatus = patient[statusKey] || "";
   const oldSubStatus = patient[subKey] || "";
 
-  const count = Number(patient[countKey] || 0);
-  const stalled = Number(patient[stalledKey] || 0) + 1;
-
+  const existingCount = Number(patient[countKey] || 0);
+  const nextMessageCount = existingCount + 1;
   const currentSendTime = new Date();
-  const firstSentTime = patient[workflowStartedAtKey]
-    ? parseSheetDateTime(patient[workflowStartedAtKey]) || currentSendTime
-    : currentSendTime;
-
-  const plan = getMixedReminderPlan(
-    stalled,
-    settings,
-    firstSentTime,
-    currentSendTime
-  );
+  const plan = getMixedReminderPlan(nextMessageCount, settings, currentSendTime);
 
   await updateRow(patient.rowNumber, {
     [statusKey]: settings.status_after_send || "contacted",
@@ -389,8 +368,8 @@ async function markSent(patient, headers, settings, finalMessage) {
     [workflowStartedAtKey]: patient[workflowStartedAtKey] || formatDate(currentSendTime),
     [generatedKey]: patient[generatedKey] || "",
     [finalKey]: finalMessage,
-    [stalledKey]: String(stalled),
-    [countKey]: String(count + 1),
+    [stalledKey]: String(nextMessageCount),
+    [countKey]: String(nextMessageCount),
     [alertKey]: "",
     [updatedAtKey]: formatDate(currentSendTime)
   });
@@ -442,7 +421,6 @@ async function resetPatientsSheetIfThresholdReached() {
 
   const headers = rows[0].map(normalizeHeader);
   const fullNameIndex = headers.findIndex((h) => h === "full_name");
-
   if (fullNameIndex === -1) {
     return { triggered: false, filledCount: 0 };
   }
@@ -451,16 +429,12 @@ async function resetPatientsSheetIfThresholdReached() {
   for (let i = 1; i < rows.length; i++) {
     const row = rows[i] || [];
     const fullName = row[fullNameIndex];
-    if (hasValue(fullName)) {
-      filledCount++;
-    }
+    if (hasValue(fullName)) filledCount++;
   }
 
   if (filledCount < AUTO_RESET_THRESHOLD) {
     return { triggered: false, filledCount };
   }
-
-  console.log(`Patients threshold reached (${filledCount}). Resetting patient rows while preserving formulas...`);
 
   const formulaRes = await withGoogleRetry(
     () =>
@@ -476,10 +450,7 @@ async function resetPatientsSheetIfThresholdReached() {
   const cleanedRows = formulaRows.map((row) =>
     row.map((cell) => {
       const value = String(cell ?? "");
-      if (value.startsWith("=")) {
-        return value;
-      }
-      return "";
+      return value.startsWith("=") ? value : "";
     })
   );
 
@@ -490,15 +461,12 @@ async function resetPatientsSheetIfThresholdReached() {
           spreadsheetId: env.GOOGLE_SHEET_ID,
           range: `${SHEET_NAME}!A2:${PATIENTS_RANGE_END}${cleanedRows.length + 1}`,
           valueInputOption: "USER_ENTERED",
-          requestBody: {
-            values: cleanedRows
-          }
+          requestBody: { values: cleanedRows }
         }),
       "resetPatientsSheetIfThresholdReached.writeReset"
     );
   }
 
-  console.log("Patients sheet reset complete.");
   return { triggered: true, filledCount };
 }
 

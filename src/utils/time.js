@@ -35,7 +35,6 @@ function getTurkeyParts(date = new Date()) {
 
 function formatDate(date) {
   const tr = getTurkeyParts(new Date(date));
-
   return `${tr.year}-${pad(tr.month)}-${pad(tr.day)} ${pad(tr.hour)}:${pad(tr.minute)}:${pad(tr.second)}`;
 }
 

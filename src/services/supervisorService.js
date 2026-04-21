@@ -2,13 +2,10 @@ const state = {
   lastPollingSuccessAt: null,
   lastPollingErrorAt: null,
   lastPollingErrorMessage: "",
-
   lastTelegramSuccessAt: null,
   lastSheetsSuccessAt: null,
   lastAiSuccessAt: null,
-
   alertsSent: new Map(),
-
   counters: {
     newPatientsToday: 0,
     messagesMarkedSentToday: 0,
@@ -16,7 +13,6 @@ const state = {
     callRemindersTriggeredToday: 0,
     errorsToday: 0
   },
-
   lastDailySummaryDate: null
 };
 
@@ -65,11 +61,9 @@ function resetDailyCountersIfNeeded() {
 
 function incrementCounter(counterName) {
   resetDailyCountersIfNeeded();
-
   if (typeof state.counters[counterName] !== "number") {
     state.counters[counterName] = 0;
   }
-
   state.counters[counterName] += 1;
 }
 
@@ -123,8 +117,7 @@ function classifySource(source = "") {
   const s = String(source).toLowerCase();
 
   if (s.includes("telegram")) return "telegram";
-  if (s.includes("sheet")) return "sheets";
-  if (s.includes("google")) return "sheets";
+  if (s.includes("sheet") || s.includes("google")) return "sheets";
   if (s.includes("ai")) return "ai";
   if (s.includes("poll")) return "scheduler";
   if (s.includes("call")) return "call_reminder";
@@ -138,17 +131,9 @@ function buildLikelyReason(source, error) {
   const cls = classifySource(source);
   const msg = String(error?.message || "").toLowerCase();
 
-  if (cls === "telegram") {
-    return "Telegram bot API issue, token/chat mismatch, or temporary Telegram request failure.";
-  }
-
-  if (cls === "sheets") {
-    return "Google Sheets API/network issue, credentials problem, or temporary request timeout.";
-  }
-
-  if (cls === "ai") {
-    return "AI provider issue, API key problem, rate limit, or temporary model request failure.";
-  }
+  if (cls === "telegram") return "Telegram bot API issue, token/chat mismatch, or temporary Telegram request failure.";
+  if (cls === "sheets") return "Google Sheets API/network issue, credentials problem, or temporary request timeout.";
+  if (cls === "ai") return "AI provider issue, API key problem, rate limit, or temporary model request failure.";
 
   if (cls === "scheduler") {
     if (msg.includes("timeout") || msg.includes("aborted")) {
@@ -157,17 +142,9 @@ function buildLikelyReason(source, error) {
     return "Polling cycle hit an unhandled workflow or service error.";
   }
 
-  if (cls === "call_reminder") {
-    return "Call reminder row state may be incomplete or Telegram send failed.";
-  }
-
-  if (cls === "follow_up") {
-    return "Follow-up generation/send failed or row state is inconsistent.";
-  }
-
-  if (cls === "webhook") {
-    return "Telegram webhook request processing failed or callback handling hit an error.";
-  }
+  if (cls === "call_reminder") return "Call reminder row state may be incomplete or Telegram send failed.";
+  if (cls === "follow_up") return "Follow-up generation/send failed or row state is inconsistent.";
+  if (cls === "webhook") return "Telegram webhook request processing failed or callback handling hit an error.";
 
   return "Unhandled system error.";
 }
@@ -180,37 +157,14 @@ function buildSuggestedAction(source, error) {
     return "No manual action needed now. System will retry automatically.";
   }
 
-  if (cls === "telegram") {
-    return "Check TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, and verify the bot can message your chat.";
-  }
-
-  if (cls === "sheets") {
-    return "Check GOOGLE_SHEET_ID, service account email, private key, and sheet sharing permissions.";
-  }
-
-  if (cls === "ai") {
-    return "Check OPENAI_API_KEY / ANTHROPIC_API_KEY, model names, and provider availability.";
-  }
-
-  if (cls === "scheduler") {
-    return "Open Railway logs and inspect the latest polling cycle error for the specific failing service.";
-  }
-
-  if (cls === "call_reminder") {
-    return "Check call_pending_input, call_reminder_at, and call_reminder_active in the patient row.";
-  }
-
-  if (cls === "follow_up") {
-    return "Check next_followup_at, current_task_active, next_action, and telegram_last_alert_id fields.";
-  }
-
-  if (cls === "webhook") {
-    return "Verify webhook is set correctly and test button click / text input flow again.";
-  }
-
-  if (msg.includes("not found")) {
-    return "Check IDs, headers, and referenced rows/fields.";
-  }
+  if (cls === "telegram") return "Check TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, and verify the bot can message your chat.";
+  if (cls === "sheets") return "Check GOOGLE_SHEET_ID, service account email, private key, and sheet sharing permissions.";
+  if (cls === "ai") return "Check OPENAI_API_KEY / ANTHROPIC_API_KEY, model names, and provider availability.";
+  if (cls === "scheduler") return "Open Railway logs and inspect the latest polling cycle error for the specific failing service.";
+  if (cls === "call_reminder") return "Check call_pending_input, call_reminder_at, and call_reminder_active in the patient row.";
+  if (cls === "follow_up") return "Check next_followup_at, current_task_active, next_action, and telegram_last_alert_id fields.";
+  if (cls === "webhook") return "Verify webhook is set correctly and test button click / text input flow again.";
+  if (msg.includes("not found")) return "Check IDs, headers, and referenced rows/fields.";
 
   return "Check Railway logs and the affected module.";
 }
@@ -311,13 +265,8 @@ async function sendDailySummaryIfNeeded() {
   const todayKey = getTurkeyDateKey();
   const summaryKey = `daily-summary-${todayKey}`;
 
-  if (currentHour !== 21 || currentMinute > 10) {
-    return;
-  }
-
-  if (shouldThrottle("daily-summary", summaryKey, 20 * 60 * 60 * 1000)) {
-    return;
-  }
+  if (currentHour !== 21 || currentMinute > 10) return;
+  if (shouldThrottle("daily-summary", summaryKey, 20 * 60 * 60 * 1000)) return;
 
   await notifySupervisor(
     "Daily system summary",
@@ -327,7 +276,40 @@ async function sendDailySummaryIfNeeded() {
 💬 Messages marked sent: ${state.counters.messagesMarkedSentToday}
 🔁 Follow-ups triggered: ${state.counters.followUpsTriggeredToday}
 📞 Call reminders triggered: ${state.counters.callRemindersTriggeredToday}
-❌ Errors today: ${state.counters.errorsToday}`
+❌ Errors today: ${state.counters.errorsToday}
+
+✅ Last polling success: ${
+      state.lastPollingSuccessAt
+        ? new Date(state.lastPollingSuccessAt).toLocaleString("en-GB", {
+            timeZone: process.env.TIMEZONE || "Europe/Istanbul",
+            hour12: false
+          }) + " (TR time)"
+        : "never"
+    }
+✅ Last Telegram success: ${
+      state.lastTelegramSuccessAt
+        ? new Date(state.lastTelegramSuccessAt).toLocaleString("en-GB", {
+            timeZone: process.env.TIMEZONE || "Europe/Istanbul",
+            hour12: false
+          }) + " (TR time)"
+        : "never"
+    }
+✅ Last Sheets success: ${
+      state.lastSheetsSuccessAt
+        ? new Date(state.lastSheetsSuccessAt).toLocaleString("en-GB", {
+            timeZone: process.env.TIMEZONE || "Europe/Istanbul",
+            hour12: false
+          }) + " (TR time)"
+        : "never"
+    }
+✅ Last AI success: ${
+      state.lastAiSuccessAt
+        ? new Date(state.lastAiSuccessAt).toLocaleString("en-GB", {
+            timeZone: process.env.TIMEZONE || "Europe/Istanbul",
+            hour12: false
+          }) + " (TR time)"
+        : "never"
+    }`
   );
 }
 
@@ -345,7 +327,6 @@ async function runSelfCheck() {
 
     if (checks.length > 0) {
       const detail = checks.join(" | ");
-
       if (!shouldThrottle("selfcheck-missing-env", detail, 60 * 60 * 1000)) {
         await notifySupervisor(
           "Configuration issue detected",

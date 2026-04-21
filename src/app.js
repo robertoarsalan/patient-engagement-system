@@ -89,14 +89,7 @@ function parseCallReminderInput(text) {
     const nowUtc = new Date();
     if (reminderDate.getTime() <= nowUtc.getTime()) {
       reminderDate = new Date(
-        Date.UTC(
-          trNow.year,
-          trNow.month - 1,
-          trNow.day + 1,
-          hour - 3,
-          minute,
-          0
-        )
+        Date.UTC(trNow.year, trNow.month - 1, trNow.day + 1, hour - 3, minute, 0)
       );
     }
 
@@ -119,10 +112,7 @@ function isStaleTaskButton(callbackQuery, patient, telegramLastAlertValue) {
   const clickedMessageId = String(callbackQuery?.message?.message_id || "");
   const activeMessageId = String(telegramLastAlertValue || "");
 
-  if (!activeMessageId) {
-    return true;
-  }
-
+  if (!activeMessageId) return true;
   return clickedMessageId !== activeMessageId;
 }
 

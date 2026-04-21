@@ -1,6 +1,5 @@
 const {
   getSheetData,
-  getSettings,
   toBool,
   hasValue,
   findHeader,
@@ -13,7 +12,6 @@ const { recordNewPatient } = require("./supervisorService");
 
 async function checkNewPatients() {
   const { headers, patients } = await getSheetData();
-  const settings = await getSettings();
 
   const fullNameKey = findHeader(headers, "full_name");
   const patientIdKey = findHeader(headers, "patient_id");
@@ -31,8 +29,6 @@ async function checkNewPatients() {
   const updatedAtKey = findHeader(headers, "updated_at");
   const countKey = findHeader(headers, "message_count");
   const stalledKey = findHeader(headers, "stalled_task_counter");
-
-  let startedCount = 0;
 
   for (const patient of patients) {
     try {
@@ -94,7 +90,6 @@ async function checkNewPatients() {
       });
 
       recordNewPatient();
-      startedCount++;
 
       console.log(
         `Instant Telegram task sent for row ${patient.rowNumber} (${patient[patientIdKey] || ""})`
@@ -105,12 +100,6 @@ async function checkNewPatients() {
         error.response?.data || error.message || error
       );
     }
-  }
-
-  if (startedCount === 0) {
-    console.log("No new patients to process.");
-  } else {
-    console.log(`Started workflow instantly for ${startedCount} patient(s).`);
   }
 }
 
