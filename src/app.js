@@ -1,476 +1,202 @@
 const express = require("express");
 const env = require("./config/env");
-const { startPollSheetJob } = require("./jobs/pollSheetJob");
+
 const {
   getSheetData,
-  getSettings,
   findHeader,
   updateRow,
-  markSent,
   formatDate
 } = require("./services/sheetService");
-const { generatePatientMessage } = require("./services/aiService");
+
 const {
   sendTelegramMessage,
-  sendPatientTaskCard,
-  answerCallbackQuery,
-  getTelegramWebhookInfo
+  answerCallbackQuery
 } = require("./services/telegramService");
+
 const {
-  notifyError,
-  startSupervisor,
-  installGlobalErrorHandlers
+  notifyError
 } = require("./services/supervisorService");
 
 const app = express();
 app.use(express.json());
 
-function getTurkeyNowDate() {
-  const now = new Date();
-  const tr = new Intl.DateTimeFormat("en-GB", {
-    timeZone: env.TIMEZONE || "Europe/Istanbul",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false
-  }).formatToParts(now);
+/* =========================
+   HELPERS
+========================= */
 
-  const map = {};
-  for (const part of tr) {
-    if (part.type !== "literal") map[part.type] = part.value;
-  }
-
-  return {
-    year: Number(map.year),
-    month: Number(map.month),
-    day: Number(map.day),
-    hour: Number(map.hour),
-    minute: Number(map.minute),
-    second: Number(map.second)
-  };
+function toBool(value) {
+  return String(value || "").toLowerCase() === "true";
 }
 
-function buildTurkeyDate(year, month, day, hour, minute, second = 0) {
-  return new Date(Date.UTC(year, month - 1, day, hour - 3, minute, second));
+function getLast4(phone) {
+  const clean = String(phone || "").replace(/\D/g, "");
+  return clean.slice(-4) || "----";
 }
 
-function parseCallReminderInput(text) {
-  const raw = String(text || "").trim();
+/* =========================
+   TIME PARSER (VERY IMPORTANT)
+========================= */
 
-  const full = raw.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})$/);
-  if (full) {
-    const year = Number(full[1]);
-    const month = Number(full[2]);
-    const day = Number(full[3]);
-    const hour = Number(full[4]);
-    const minute = Number(full[5]);
-    return buildTurkeyDate(year, month, day, hour, minute, 0);
-  }
+function parseCallTime(input) {
+  const text = String(input || "").trim();
 
-  const short = raw.match(/^(\d{2}):(\d{2})$/);
-  if (short) {
-    const trNow = getTurkeyNowDate();
-    const hour = Number(short[1]);
-    const minute = Number(short[2]);
+  // HH:mm
+  let m = text.match(/^(\d{1,2}):(\d{2})$/);
+  if (m) {
+    const now = new Date();
 
-    let reminderDate = buildTurkeyDate(
-      trNow.year,
-      trNow.month,
-      trNow.day,
-      hour,
-      minute,
-      0
-    );
+    const date = new Date();
+    date.setHours(Number(m[1]));
+    date.setMinutes(Number(m[2]));
+    date.setSeconds(0);
 
-    const nowUtc = new Date();
-    if (reminderDate.getTime() <= nowUtc.getTime()) {
-      reminderDate = new Date(
-        Date.UTC(trNow.year, trNow.month - 1, trNow.day + 1, hour - 3, minute, 0)
-      );
+    // if time already passed today → schedule tomorrow
+    if (date.getTime() <= now.getTime()) {
+      date.setDate(date.getDate() + 1);
     }
 
-    return reminderDate;
+    return date;
+  }
+
+  // YYYY-MM-DD HH:mm
+  m = text.match(/^(\d{4})-(\d{2})-(\d{2}) (\d{1,2}):(\d{2})$/);
+  if (m) {
+    return new Date(
+      Number(m[1]),
+      Number(m[2]) - 1,
+      Number(m[3]),
+      Number(m[4]),
+      Number(m[5]),
+      0
+    );
   }
 
   return null;
 }
 
-function getLast4(phone) {
-  const digits = String(phone || "").replace(/\D/g, "");
-  return digits.slice(-4) || "----";
-}
-
-function toBoolSafe(value) {
-  return String(value || "").trim().toLowerCase() === "true";
-}
-
-function isStaleTaskButton(callbackQuery, patient, telegramLastAlertValue) {
-  const clickedMessageId = String(callbackQuery?.message?.message_id || "");
-  const activeMessageId = String(telegramLastAlertValue || "");
-
-  if (!activeMessageId) {
-    return true;
-  }
-
-  return clickedMessageId !== activeMessageId;
-}
-
-app.get("/", (req, res) => {
-  res.send("Patient engagement backend is running");
-});
-
-app.get("/health", (req, res) => {
-  res.json({
-    ok: true,
-    message: "Patient engagement backend is running"
-  });
-});
-
-app.get("/telegram-webhook", (req, res) => {
-  res.json({
-    ok: true,
-    message: "Telegram webhook route exists"
-  });
-});
-
-app.get("/telegram-webhook-info", async (req, res) => {
-  try {
-    const info = await getTelegramWebhookInfo();
-    res.json(info);
-  } catch (error) {
-    console.error("Webhook info error:", error.response?.data || error.message || error);
-    await notifyError("app.telegram-webhook-info", error);
-    res.status(500).json({
-      ok: false,
-      error: error.response?.data || error.message || String(error)
-    });
-  }
-});
+/* =========================
+   TELEGRAM WEBHOOK
+========================= */
 
 app.post("/telegram-webhook", async (req, res) => {
   try {
-    const body = req.body || {};
+    const body = req.body;
+
+    /* =========================
+       BUTTON CLICK HANDLER
+    ========================= */
 
     if (body.callback_query) {
-      const callbackQuery = body.callback_query;
-      const callbackData = callbackQuery.data || "";
-      const callbackQueryId = callbackQuery.id;
+      const data = body.callback_query.data || "";
+      const callbackId = body.callback_query.id;
 
-      const [action, rowNumberRaw] = callbackData.split(":");
-      const rowNumber = Number(rowNumberRaw);
-
-      console.log("Button clicked:", callbackData);
+      const [action, rowRaw] = data.split(":");
+      const rowNumber = Number(rowRaw);
 
       const { headers, patients } = await getSheetData();
-      const patient = patients.find((p) => Number(p.rowNumber) === rowNumber);
+      const patient = patients.find(p => p.rowNumber === rowNumber);
 
       if (!patient) {
-        await answerCallbackQuery(callbackQueryId, "Patient not found");
+        await answerCallbackQuery(callbackId, "Patient not found");
         return res.json({ ok: true });
       }
 
-      const currentTaskActiveKey = findHeader(headers, "current_task_active");
-      const nextActionKey = findHeader(headers, "next_action");
-      const nextFollowupAtKey = findHeader(headers, "next_followup_at");
-      const telegramLastAlertKey = findHeader(headers, "telegram_last");
-      const lastGeneratedMessageKey = findHeader(headers, "last_generated_message");
-      const lastFinalMessageKey = findHeader(headers, "last_final_message");
-      const statusKey = findHeader(headers, "status");
-      const subStatusKey = findHeader(headers, "sub_status");
-      const notesKey = findHeader(headers, "notes");
-      const updatedAtKey = findHeader(headers, "updated_at");
+      const callPendingKey = findHeader(headers, "call_pending_input");
+      const callActiveKey = findHeader(headers, "call_reminder_active");
+      const callTimeKey = findHeader(headers, "call_reminder_at");
+      const updatedKey = findHeader(headers, "updated_at");
 
-      const callPendingInputKey = findHeader(headers, "call_pending_input");
-      const callReminderAtKey = findHeader(headers, "call_reminder_at");
-      const callReminderActiveKey = findHeader(headers, "call_reminder_active");
-
-      const actionsNeedingFreshTaskCard = new Set([
-        "message",
-        "call",
-        "regen",
-        "done",
-        "snooze15",
-        "hot"
-      ]);
-
-      if (actionsNeedingFreshTaskCard.has(action)) {
-        const stale = isStaleTaskButton(callbackQuery, patient, patient[telegramLastAlertKey]);
-
-        if (stale) {
-          await answerCallbackQuery(
-            callbackQueryId,
-            "This is an old task card. Use the latest notification."
-          );
-          return res.json({ ok: true });
-        }
-      }
-
-      if (action === "message") {
-        try {
-          const settings = await getSettings();
-          let finalMessage = patient[lastFinalMessageKey] || "";
-
-          if (!finalMessage) {
-            const aiResult = await generatePatientMessage(patient);
-
-            await updateRow(patient.rowNumber, {
-              [lastGeneratedMessageKey]: aiResult.generatedMessage,
-              [lastFinalMessageKey]: aiResult.finalMessage,
-              [updatedAtKey]: formatDate(new Date())
-            });
-
-            finalMessage = aiResult.finalMessage;
-          }
-
-          const result = await markSent(patient, headers, settings, finalMessage);
-
-          await answerCallbackQuery(callbackQueryId, "Message marked as sent");
-
-          const refreshedData = await getSheetData();
-          const refreshedPatient = refreshedData.patients.find(
-            (p) => Number(p.rowNumber) === rowNumber
-          );
-
-          await sendTelegramMessage(
-            `✅ Message marked as sent for row ${rowNumber}
-👤 ${patient.full_name || ""}
-📌 Status: ${refreshedPatient?.[statusKey] || "contacted"}
-📌 Sub-status: ${refreshedPatient?.[subStatusKey] || "waiting_reply"}
-⏰ Next reminder: ${result.nextFollowupAt} (TR time)`
-          );
-
-          return res.json({ ok: true });
-        } catch (error) {
-          console.error("Send Message action failed:", error.response?.data || error.message || error);
-          await notifyError("app.action.message", error);
-          await answerCallbackQuery(callbackQueryId, "Send Message failed");
-          return res.status(500).json({
-            ok: false,
-            action: "message",
-            error: error.response?.data || error.message || String(error)
-          });
-        }
-      }
+      /* ===== CALL BUTTON ===== */
 
       if (action === "call") {
-        try {
-          await updateRow(patient.rowNumber, {
-            [callPendingInputKey]: "TRUE",
-            [callReminderActiveKey]: "FALSE",
-            [callReminderAtKey]: "",
-            [updatedAtKey]: formatDate(new Date())
-          });
-
-          await answerCallbackQuery(callbackQueryId, "Reply with call time");
-
-          await sendTelegramMessage(
-            `📞 Reply with call time for ${patient.full_name || ""} (${getLast4(patient.phone)})
-Format:
-HH:mm
-or
-YYYY-MM-DD HH:mm`
-          );
-
-          return res.json({ ok: true });
-        } catch (error) {
-          console.error("Call action failed:", error.response?.data || error.message || error);
-          await notifyError("app.action.call", error);
-          await answerCallbackQuery(callbackQueryId, "Call reminder failed");
-          return res.status(500).json({
-            ok: false,
-            action: "call",
-            error: error.response?.data || error.message || String(error)
-          });
+        // 🔴 RESET ANY OLD PENDING FIRST
+        for (const p of patients) {
+          if (toBool(p[callPendingKey])) {
+            await updateRow(p.rowNumber, {
+              [callPendingKey]: "FALSE"
+            });
+          }
         }
+
+        // 🟢 SET NEW PENDING
+        await updateRow(patient.rowNumber, {
+          [callPendingKey]: "TRUE",
+          [callActiveKey]: "FALSE",
+          [callTimeKey]: "",
+          [updatedKey]: formatDate(new Date())
+        });
+
+        await answerCallbackQuery(callbackId, "Enter call time");
+
+        await sendTelegramMessage(
+          `📞 Call setup\n\n👤 ${patient.full_name}\n📱 ${getLast4(patient.phone)}\n\nSend time:\nHH:mm\nor\nYYYY-MM-DD HH:mm`
+        );
+
+        return res.json({ ok: true });
       }
 
-      if (action === "regen") {
-        try {
-          const aiResult = await generatePatientMessage(patient);
-
-          await updateRow(patient.rowNumber, {
-            [lastGeneratedMessageKey]: aiResult.generatedMessage,
-            [lastFinalMessageKey]: aiResult.finalMessage,
-            [telegramLastAlertKey]: "",
-            [updatedAtKey]: formatDate(new Date())
-          });
-
-          await answerCallbackQuery(callbackQueryId, "Message regenerated");
-
-          await sendPatientTaskCard(
-            patient.rowNumber,
-            {
-              ...patient,
-              [lastFinalMessageKey]: aiResult.finalMessage
-            },
-            aiResult.finalMessage
-          );
-
-          return res.json({ ok: true });
-        } catch (error) {
-          console.error("Regenerate action failed:", error.response?.data || error.message || error);
-          await notifyError("app.action.regen", error);
-          await answerCallbackQuery(callbackQueryId, "Regenerate failed");
-          return res.status(500).json({
-            ok: false,
-            action: "regen",
-            error: error.response?.data || error.message || String(error)
-          });
-        }
-      }
-
-      if (action === "done") {
-        try {
-          await updateRow(patient.rowNumber, {
-            [currentTaskActiveKey]: "FALSE",
-            [nextActionKey]: "done",
-            [nextFollowupAtKey]: "",
-            [telegramLastAlertKey]: "",
-            [statusKey]: patient[statusKey] || "contacted",
-            [subStatusKey]: "done",
-            [updatedAtKey]: formatDate(new Date())
-          });
-
-          await answerCallbackQuery(callbackQueryId, "Task marked as done");
-
-          await sendTelegramMessage(
-            `✅ Done marked for row ${rowNumber}
-👤 ${patient.full_name || ""}`
-          );
-
-          return res.json({ ok: true });
-        } catch (error) {
-          console.error("Done action failed:", error.response?.data || error.message || error);
-          await notifyError("app.action.done", error);
-          await answerCallbackQuery(callbackQueryId, "Done failed");
-          return res.status(500).json({
-            ok: false,
-            action: "done",
-            error: error.response?.data || error.message || String(error)
-          });
-        }
-      }
-
-      if (action === "snooze15") {
-        try {
-          const nextDate = new Date(Date.now() + 15 * 60 * 1000);
-          const formatted = formatDate(nextDate);
-
-          await updateRow(patient.rowNumber, {
-            [nextFollowupAtKey]: formatted,
-            [telegramLastAlertKey]: "",
-            [updatedAtKey]: formatDate(new Date())
-          });
-
-          await answerCallbackQuery(callbackQueryId, "Snoozed 15 minutes");
-
-          await sendTelegramMessage(
-            `⏳ Snoozed row ${rowNumber} for 15 minutes
-👤 ${patient.full_name || ""}
-⏰ New reminder: ${formatted} (TR time)`
-          );
-
-          return res.json({ ok: true });
-        } catch (error) {
-          console.error("Snooze action failed:", error.response?.data || error.message || error);
-          await notifyError("app.action.snooze15", error);
-          await answerCallbackQuery(callbackQueryId, "Snooze failed");
-          return res.status(500).json({
-            ok: false,
-            action: "snooze15",
-            error: error.response?.data || error.message || String(error)
-          });
-        }
-      }
-
-      if (action === "hot") {
-        try {
-          const existingNotes = patient[notesKey] || "";
-          const newNotes = existingNotes ? `${existingNotes} | HOT LEAD` : "HOT LEAD";
-
-          await updateRow(patient.rowNumber, {
-            [notesKey]: newNotes,
-            [telegramLastAlertKey]: "",
-            [updatedAtKey]: formatDate(new Date())
-          });
-
-          await answerCallbackQuery(callbackQueryId, "Hot lead marked");
-
-          await sendTelegramMessage(
-            `🔥 Hot lead marked
-👤 ${patient.full_name || ""}
-🆔 Row ${rowNumber}`
-          );
-
-          return res.json({ ok: true });
-        } catch (error) {
-          console.error("Hot action failed:", error.response?.data || error.message || error);
-          await notifyError("app.action.hot", error);
-          await answerCallbackQuery(callbackQueryId, "Hot lead failed");
-          return res.status(500).json({
-            ok: false,
-            action: "hot",
-            error: error.response?.data || error.message || String(error)
-          });
-        }
-      }
-
-      await answerCallbackQuery(callbackQueryId, "Unknown action");
+      await answerCallbackQuery(callbackId, "OK");
       return res.json({ ok: true });
     }
 
+    /* =========================
+       TEXT INPUT HANDLER (CALL TIME)
+    ========================= */
+
     if (body.message && body.message.text) {
-      const messageText = String(body.message.text || "").trim();
+      const text = body.message.text;
 
       const { headers, patients } = await getSheetData();
-      const callPendingInputKey = findHeader(headers, "call_pending_input");
-      const callReminderAtKey = findHeader(headers, "call_reminder_at");
-      const callReminderActiveKey = findHeader(headers, "call_reminder_active");
-      const updatedAtKey = findHeader(headers, "updated_at");
 
-      const pendingPatient = patients.find((p) => toBoolSafe(p[callPendingInputKey]));
+      const callPendingKey = findHeader(headers, "call_pending_input");
+      const callActiveKey = findHeader(headers, "call_reminder_active");
+      const callTimeKey = findHeader(headers, "call_reminder_at");
+      const updatedKey = findHeader(headers, "updated_at");
 
-      if (pendingPatient) {
-        const parsed = parseCallReminderInput(messageText);
+      const pending = patients.find(p => toBool(p[callPendingKey]));
 
-        if (!parsed) {
-          await sendTelegramMessage("❌ Invalid time. Use HH:mm or YYYY-MM-DD HH:mm");
-          return res.json({ ok: true });
-        }
-
-        const formatted = formatDate(parsed);
-
-        await updateRow(pendingPatient.rowNumber, {
-          [callPendingInputKey]: "FALSE",
-          [callReminderAtKey]: formatted,
-          [callReminderActiveKey]: "TRUE",
-          [updatedAtKey]: formatDate(new Date())
-        });
-
-        await sendTelegramMessage("✅ Call reminder saved");
+      if (!pending) {
         return res.json({ ok: true });
       }
+
+      const parsed = parseCallTime(text);
+
+      if (!parsed) {
+        await sendTelegramMessage("❌ Invalid format. Use HH:mm or YYYY-MM-DD HH:mm");
+        return res.json({ ok: true });
+      }
+
+      const formatted = formatDate(parsed);
+
+      await updateRow(pending.rowNumber, {
+        [callPendingKey]: "FALSE",
+        [callActiveKey]: "TRUE",
+        [callTimeKey]: formatted,
+        [updatedKey]: formatDate(new Date())
+      });
+
+      await sendTelegramMessage(
+        `✅ Call reminder saved\n\n👤 ${pending.full_name}\n⏰ ${formatted} (TR time)`
+      );
+
+      return res.json({ ok: true });
     }
 
     return res.json({ ok: true });
+
   } catch (error) {
-    console.error("Telegram webhook error:", error.response?.data || error.message || error);
-    await notifyError("app.telegram-webhook", error);
+    console.error("Webhook error:", error.message);
+    await notifyError("telegram-webhook", error);
+
     return res.status(500).json({
       ok: false,
-      error: error.response?.data || error.message || String(error)
+      error: error.message
     });
   }
 });
 
-installGlobalErrorHandlers();
+/* ========================= */
 
 app.listen(env.PORT, () => {
-  console.log(`Server running on http://localhost:${env.PORT}`);
-  console.log("🚀 Polling job started...");
-  startSupervisor();
-  startPollSheetJob();
+  console.log("🚀 Server running...");
 });
