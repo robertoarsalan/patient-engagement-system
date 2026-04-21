@@ -32,88 +32,50 @@ function normalizeAgeGroup(raw) {
   if (!value) return "";
 
   if (
-    value.includes("18") ||
-    value.includes("19") ||
-    value.includes("20") ||
-    value.includes("21") ||
-    value.includes("22") ||
-    value.includes("23") ||
-    value.includes("24") ||
-    value.includes("25") ||
-    value.includes("26") ||
-    value.includes("27") ||
-    value.includes("28") ||
-    value.includes("29") ||
-    value.includes("30") ||
-    value.includes("young")
+    value.includes("young") ||
+    value.includes("giovane") ||
+    value.includes("18-30") ||
+    value.includes("18_30") ||
+    value.includes("18 to 30")
   ) {
     return "young_adult";
   }
 
   if (
-    value.includes("31") ||
-    value.includes("32") ||
-    value.includes("33") ||
-    value.includes("34") ||
-    value.includes("35") ||
-    value.includes("36") ||
-    value.includes("37") ||
-    value.includes("38") ||
-    value.includes("39") ||
-    value.includes("40") ||
-    value.includes("41") ||
-    value.includes("42") ||
-    value.includes("43") ||
-    value.includes("44") ||
-    value.includes("45") ||
-    value.includes("adult")
+    value.includes("adult") ||
+    value.includes("31-45") ||
+    value.includes("31_45") ||
+    value.includes("31 to 45")
   ) {
     return "adult";
   }
 
   if (
-    value.includes("46") ||
-    value.includes("47") ||
-    value.includes("48") ||
-    value.includes("49") ||
-    value.includes("50") ||
-    value.includes("51") ||
-    value.includes("52") ||
-    value.includes("53") ||
-    value.includes("54") ||
-    value.includes("55") ||
-    value.includes("56") ||
-    value.includes("57") ||
-    value.includes("58") ||
-    value.includes("59") ||
-    value.includes("60") ||
-    value.includes("mature")
+    value.includes("mature") ||
+    value.includes("maturo") ||
+    value.includes("46-60") ||
+    value.includes("46_60") ||
+    value.includes("46 to 60")
   ) {
     return "mature";
   }
 
   if (
-    value.includes("61") ||
-    value.includes("62") ||
-    value.includes("63") ||
-    value.includes("64") ||
-    value.includes("65") ||
-    value.includes("66") ||
-    value.includes("67") ||
-    value.includes("68") ||
-    value.includes("69") ||
-    value.includes("70") ||
-    value.includes("senior")
+    value.includes("senior") ||
+    value.includes("61+") ||
+    value.includes("61_plus") ||
+    value.includes("61 plus") ||
+    value.includes("over 60")
   ) {
     return "senior";
   }
 
-  return value;
+  return "";
 }
 
 function getAgeGroup(patient) {
-  const rawGroup = normalizeAgeGroup(patient.age_group);
-  if (rawGroup) return rawGroup;
+  const fromSheet = normalizeAgeGroup(patient.age_group);
+  if (fromSheet) return fromSheet;
 
   const age = getPatientAge(patient);
 
@@ -134,224 +96,180 @@ function getFollowUpStage(patient) {
   return 3;
 }
 
-function getToneInstructionByAge(patient) {
-  const group = getAgeGroup(patient);
+function getToneProfile(patient) {
+  const ageGroup = getAgeGroup(patient);
 
-  if (group === "young_adult") {
-    return `
-Age tone profile: YOUNG ADULT (18-30)
-
-Message style:
-- warm, modern, human
-- more natural and slightly lighter
-- direct and easy to read
-- less formal
-- still professional
-
-Do:
-- sound like a real consultant on WhatsApp
-- keep energy slightly fresher
-- make the message feel quick and natural
-
-Do not:
-- sound stiff
-- sound corporate
-- use overly formal constructions
-- sound like an old-fashioned clinic script
-`;
+  if (ageGroup === "young_adult") {
+    return {
+      code: "young_adult",
+      label: "Young adult 18-30",
+      greetingStyle: "ciao",
+      formality: "low",
+      energy: "fresh",
+      pacing: "quick",
+      emotionalTone: "light, warm, natural",
+      forbidden: [
+        "Buongiorno",
+        "volevo informarla",
+        "le scriverò",
+        "la sua valutazione",
+        "gentilmente",
+        "qualora"
+      ],
+      required: [
+        "short WhatsApp rhythm",
+        "simple wording",
+        "modern natural Italian",
+        "not stiff"
+      ]
+    };
   }
 
-  if (group === "adult") {
-    return `
-Age tone profile: ADULT (31-45)
-
-Message style:
-- balanced
-- confident
-- clear
-- natural
-- professional without being cold
-
-Do:
-- sound competent and efficient
-- keep a strong but relaxed tone
-- create trust and forward movement
-
-Do not:
-- sound too playful
-- sound too rigid
-- sound too salesy
-`;
+  if (ageGroup === "adult") {
+    return {
+      code: "adult",
+      label: "Adult 31-45",
+      greetingStyle: "ciao",
+      formality: "medium",
+      energy: "balanced",
+      pacing: "clear",
+      emotionalTone: "confident, calm, human",
+      forbidden: [
+        "overly formal clinic language",
+        "too playful slang"
+      ],
+      required: [
+        "clear",
+        "trustworthy",
+        "professional but human"
+      ]
+    };
   }
 
-  if (group === "mature") {
-    return `
-Age tone profile: MATURE (46-60)
-
-Message style:
-- reassuring
-- polished
-- respectful
-- confidence-building
-- slightly more composed
-
-Do:
-- sound calm and reliable
-- communicate care and clarity
-- make the patient feel guided well
-
-Do not:
-- sound too casual
-- sound rushed
-- sound like trendy marketing language
-`;
+  if (ageGroup === "mature") {
+    return {
+      code: "mature",
+      label: "Mature 46-60",
+      greetingStyle: "buongiorno_or_ciao_respectful",
+      formality: "medium-high",
+      energy: "calm",
+      pacing: "composed",
+      emotionalTone: "reassuring, polished, respectful",
+      forbidden: [
+        "slang",
+        "too casual modern expressions",
+        "overly trendy language"
+      ],
+      required: [
+        "respectful",
+        "calm",
+        "confidence-building"
+      ]
+    };
   }
 
-  if (group === "senior") {
-    return `
-Age tone profile: SENIOR (61+)
+  return {
+    code: "senior",
+    label: "Senior 61+",
+    greetingStyle: "buongiorno",
+    formality: "high",
+    energy: "calm",
+    pacing: "very clear",
+    emotionalTone: "respectful, supportive, trust-first",
+    forbidden: [
+      "ciao unless clearly natural",
+      "slang",
+      "casual shortcuts",
+      "trendy phrasing",
+      "youthful modern tone"
+    ],
+    required: [
+      "respectful Italian",
+      "clear",
+      "stable",
+      "gentle",
+      "trust-building"
+    ]
+  };
+}
 
-Message style:
-- calm
-- respectful
-- very clear
-- supportive
-- trust-first
-- slightly more formal
-
-Do:
-- sound stable, kind, and reassuring
-- make the message very easy to understand
-- create comfort and confidence
-
-Do not:
-- use slang
-- use trendy/modern phrasing
-- sound overly casual
-- sound robotic or too long
-`;
+function buildStageGoal(stage) {
+  if (stage === 0) {
+    return {
+      name: "first_update",
+      objective: "Case still under evaluation. Give a quick update only.",
+      mustInclude: "Acknowledge evaluation is still ongoing and reassure the patient.",
+      questionRule: "No question required.",
+      callRule: "Do not ask for videocall."
+    };
   }
+
+  if (stage === 1) {
+    return {
+      name: "second_update",
+      objective: "Evaluation is almost done. Keep the patient engaged.",
+      mustInclude: "Say the evaluation is almost finished and include one short low-pressure calibrated question.",
+      questionRule: "Exactly one short question.",
+      callRule: "Do not ask for videocall."
+    };
+  }
+
+  return {
+    name: "final_ready",
+    objective: "Plan is ready. Move patient to videocall.",
+    mustInclude: "Say the plan is ready and ask for videocall availability.",
+    questionRule: "Question allowed if needed.",
+    callRule: "Must ask for videocall availability."
+  };
+}
+
+function buildPromptStyleRules(patient) {
+  const tone = getToneProfile(patient);
 
   return `
-Use a balanced professional tone:
-warm, confident, human, clear.
+AGE-DRIVEN STYLE PROFILE (MANDATORY):
+- profile: ${tone.label}
+- greeting style: ${tone.greetingStyle}
+- formality: ${tone.formality}
+- energy: ${tone.energy}
+- pacing: ${tone.pacing}
+- emotional tone: ${tone.emotionalTone}
+
+MANDATORY REQUIRED STYLE:
+${tone.required.map((x) => `- ${x}`).join("\n")}
+
+FORBIDDEN STYLE:
+${tone.forbidden.map((x) => `- ${x}`).join("\n")}
+
+IMPORTANT:
+The final text MUST sound materially different depending on age group.
+This is not optional.
+If profile is young_adult, the text must sound younger, lighter, less formal.
+If profile is mature or senior, the text must sound more respectful, calmer, and more polished.
 `;
 }
 
 function buildDraftSystemPrompt() {
   return `
-You write short Italian WhatsApp follow-up messages for medical tourism patients.
-
-Workflow context:
-- The patient already sent photos
-- The clinic is still evaluating the case
-- The goal is to keep the patient engaged while they wait for the offer
-- Messages must feel human, reassuring, and intentional
-- Every stage must feel different from the others
-- Output only the message text
+You write Italian WhatsApp follow-up messages for medical tourism patients.
 
 Rules:
 - Always in Italian
 - WhatsApp style only
-- Short and natural
+- Output only message text
 - Maximum 3 short paragraphs
 - No markdown
 - No bullet points
 - No signatures
+- No robotic wording
+- No generic clinic script
 - No fake promises
-- No robotic language
-- No internal process talk like CRM, automation, reminder, pipeline
 - At most 2 emojis total
-- Use the patient's name naturally
-- Do not write like a receptionist bot
-- Do not sound needy or salesy
-`;
-}
+- Must sound like a real human consultant
 
-function buildStageInstruction(stage) {
-  if (stage === 0) {
-    return `
-This is the FIRST message after the patient sent photos.
-
-Goal:
-- acknowledge the case is under evaluation
-- reassure the patient
-- let them know you wanted to give a quick update
-- do not pressure
-- do not ask for a videocall yet
-- this should sound personal and human
-
-Intent base:
-"hello name, I just wanted to let you know your case is still in the evaluation phase, I wanted to give you an update"
-
-Write a better and more natural Italian version.
-`;
-  }
-
-  if (stage === 1) {
-    return `
-This is the SECOND message.
-
-Goal:
-- say the evaluation is almost done
-- give a quick update
-- include ONE small calibrated question in Chris Voss style
-- the question must be short, natural, and low-pressure
-- do not ask for a videocall yet
-- create gentle engagement and get a reply
-
-Intent base:
-"hello again, the evaluation is almost done, I just wanted to give you a quick update"
-
-Important:
-- only one short question
-- question must feel human
-- question should help keep the patient engaged
-`;
-  }
-
-  return `
-This is the THIRD message.
-
-Goal:
-- say the plan is ready
-- ask when the patient is available for a videocall
-- sound confident, calm, human
-- stronger next step
-- do not sound aggressive
-
-Intent base:
-"hello, the plan is ready, may I know when you are available to have a videocall?"
-
-Write a more natural and persuasive Italian version.
-`;
-}
-
-function buildPsychologyLayerInstructions(stage) {
-  if (stage === 0) {
-    return `
-Psychology layer:
-- Chris Voss: empathy, emotional control, calm reassurance
-- Alex Hormozi: clarity and momentum, but very soft at this stage
-- focus on reducing uncertainty
-- no pressure
-`;
-  }
-
-  if (stage === 1) {
-    return `
-Psychology layer:
-- Chris Voss: use one calibrated low-pressure question
-- Alex Hormozi: create forward motion and light engagement
-- make the patient feel included, not chased
-`;
-  }
-
-  return `
-Psychology layer:
-- Chris Voss: calm confidence and emotional safety
-- Alex Hormozi: clear next action, simple commitment, momentum
-- invite the videocall in a natural way
+CRITICAL RULE:
+Age tone adaptation is mandatory.
+The tone must materially change depending on the age profile.
 `;
 }
 
@@ -360,121 +278,107 @@ function buildDraftUserPrompt(patient) {
   const age = getPatientAge(patient);
   const ageGroup = getAgeGroup(patient);
   const stage = getFollowUpStage(patient);
+  const goal = buildStageGoal(stage);
 
   return `
-Patient name: ${name}
-Age: ${age || "unknown"}
-Age group: ${ageGroup}
-Language: ${patient.language || "ITA"}
-Market: ${patient.market || "Italy"}
-Treatment type: ${patient.treatment_type || ""}
-Status: ${patient.status || ""}
-Sub-status: ${patient.sub_status || ""}
-Notes: ${patient.notes || ""}
+PATIENT DATA:
+- name: ${name}
+- age: ${age || "unknown"}
+- age_group_from_sheet: ${patient.age_group || ""}
+- normalized_age_group: ${ageGroup}
+- market: ${patient.market || "Italy"}
+- language: ${patient.language || "ITA"}
+- treatment_type: ${patient.treatment_type || ""}
+- notes: ${patient.notes || ""}
 
-${getToneInstructionByAge(patient)}
+${buildPromptStyleRules(patient)}
 
-${buildStageInstruction(stage)}
+STAGE:
+- stage_name: ${goal.name}
+- objective: ${goal.objective}
+- must_include: ${goal.mustInclude}
+- question_rule: ${goal.questionRule}
+- call_rule: ${goal.callRule}
 
-${buildPsychologyLayerInstructions(stage)}
+PSYCHOLOGY LAYER:
+- Chris Voss: empathy, calm control, low-pressure wording
+- Alex Hormozi: clarity, momentum, simple forward movement
+- never sound manipulative
+- never sound robotic
 
-Additional writing goals:
-- blend Chris Voss style: calm, empathetic, controlled, non-pushy
-- blend Alex Hormozi style: clarity, value, momentum, concise forward movement
-- sound like a real human consultant
-- each message must clearly differ from the other stages
-- age must clearly influence the tone
-- younger patients should sound lighter and more natural
-- older patients should sound more respectful and reassuring
-- keep it concise and elegant
+REFERENCE INTENT:
+Stage 1 idea:
+"hello name, I just wanted to let you know your case is still in the evaluation phase, I wanted to give you an update"
 
-Write one final Italian WhatsApp message only.
+Stage 2 idea:
+"hello again, the evaluation is almost done, I just wanted to give you a quick update"
+
+Stage 3 idea:
+"hello, the plan is ready, may I know when you are available to have a videocall?"
+
+Write ONE final Italian WhatsApp message only.
 `;
 }
 
 function buildRefineSystemPrompt() {
   return `
-You refine Italian WhatsApp messages for high-conversion patient follow-up.
-
-Your task:
-- refine a draft written by GPT
-- make it sound more human, smoother, warmer, and more natural
-- keep the original stage goal intact
-- keep the tone adapted to age / age group
-- keep it concise
-
-Style blend required:
-- Chris Voss:
-  - empathy
-  - calm control
-  - emotional intelligence
-  - soft calibrated phrasing
-- Alex Hormozi:
-  - clarity
-  - value communication
-  - momentum
-  - strong but simple next step
+You refine Italian WhatsApp messages for patient follow-up.
 
 Rules:
-- Always in Italian
-- Output only the final refined message
-- Keep it short
+- Output only the final message
+- Keep it concise
+- Keep it natural
+- Keep age-based tone clearly visible
 - Maximum 3 short paragraphs
 - No markdown
-- No bullet points
-- No formal email tone
-- No cheesy sales talk
-- No robotic wording
-- At most 2 emojis total
-- It must feel like a real human consultant wrote it
-- Different stages must feel genuinely different
-- The age group must materially affect the tone
+- No bullets
+- No robotic tone
+- No generic wording
+
+CRITICAL:
+You must preserve and strengthen the age-based tone profile.
+The final text must clearly sound different for a 28-year-old vs a 65-year-old.
 `;
 }
 
 function buildRefineUserPrompt(patient, draft) {
+  const tone = getToneProfile(patient);
   const stage = getFollowUpStage(patient);
-  const name = getPatientName(patient);
-  const age = getPatientAge(patient);
-  const ageGroup = getAgeGroup(patient);
-
-  let stageContext = "";
-  if (stage === 0) {
-    stageContext = "Stage 1: patient sent photos, case still under evaluation, reassurance/update only.";
-  } else if (stage === 1) {
-    stageContext = "Stage 2: evaluation almost done, quick update, must include one light calibrated question.";
-  } else {
-    stageContext = "Stage 3: plan is ready, ask for videocall availability.";
-  }
+  const goal = buildStageGoal(stage);
 
   return `
-Patient name: ${name}
-Age: ${age || "unknown"}
-Age group: ${ageGroup}
-${stageContext}
+PATIENT:
+- name: ${getPatientName(patient)}
+- age: ${getPatientAge(patient) || "unknown"}
+- normalized_age_group: ${getAgeGroup(patient)}
 
-Refinement goals by age:
-${getToneInstructionByAge(patient)}
+MANDATORY STYLE PROFILE:
+- ${tone.label}
+- greeting style: ${tone.greetingStyle}
+- formality: ${tone.formality}
+- emotional tone: ${tone.emotionalTone}
 
-Draft:
+FORBIDDEN:
+${tone.forbidden.map((x) => `- ${x}`).join("\n")}
+
+REQUIRED:
+${tone.required.map((x) => `- ${x}`).join("\n")}
+
+STAGE:
+- ${goal.name}
+- ${goal.objective}
+- ${goal.mustInclude}
+
+Draft to refine:
 ${draft}
 
-Refine this draft so it sounds:
-- more human
-- less robotic
-- more natural on WhatsApp
-- psychologically smart
-- clearly appropriate for the age group
+Refine it so:
+- it sounds more human
+- it clearly matches the age profile
+- it stays concise
+- it keeps the stage goal exactly right
 
-Important:
-- if age group is young_adult, the text should feel lighter and less formal
-- if age group is adult, it should feel balanced and confident
-- if age group is mature, it should feel more polished and reassuring
-- if age group is senior, it should feel more respectful, calm, and trust-building
-
-Do not overcomplicate it.
-Do not make it longer than needed.
-Return only the final refined Italian message.
+Return only the final Italian message.
 `;
 }
 
@@ -485,7 +389,7 @@ async function generateDraftWithOpenAI(patient) {
 
   const response = await openai.chat.completions.create({
     model: env.OPENAI_MODEL || "gpt-5.4-mini",
-    temperature: 0.8,
+    temperature: 0.85,
     messages: [
       { role: "system", content: buildDraftSystemPrompt() },
       { role: "user", content: buildDraftUserPrompt(patient) }
@@ -522,19 +426,27 @@ async function refineWithClaude(patient, draft) {
 
 function buildFallbackMessage(patient) {
   const name = getPatientName(patient);
-  const stage = getFollowUpStage(patient);
   const ageGroup = getAgeGroup(patient);
+  const stage = getFollowUpStage(patient);
 
   if (stage === 0) {
     if (ageGroup === "young_adult") {
       return `Ciao ${name} 👋
 
-Volevo solo aggiornarti che il tuo caso è ancora in fase di valutazione.
+Ti aggiorno al volo: il tuo caso è ancora in fase di valutazione.
+
+Ci tenevo comunque a darti un aggiornamento mentre completiamo tutto con attenzione.`;
+    }
+
+    if (ageGroup === "adult") {
+      return `Ciao ${name} 👋
+
+Volevo aggiornarti che il tuo caso è ancora in fase di valutazione.
 
 Ci tenevo a darti un rapido aggiornamento mentre stiamo completando tutto con attenzione.`;
     }
 
-    if (ageGroup === "senior") {
+    if (ageGroup === "mature") {
       return `Buongiorno ${name},
 
 volevo aggiornarla che il suo caso è ancora in fase di valutazione.
@@ -542,11 +454,11 @@ volevo aggiornarla che il suo caso è ancora in fase di valutazione.
 Ci tenevo a darle un breve aggiornamento mentre completiamo tutto con attenzione.`;
     }
 
-    return `Ciao ${name} 👋
+    return `Buongiorno ${name},
 
-Volevo solo aggiornarti che il tuo caso è ancora in fase di valutazione.
+volevo informarla che il suo caso è ancora in fase di valutazione.
 
-Ci tenevo a darti un rapido aggiornamento mentre stiamo completando tutto con attenzione.`;
+Ci tenevo a darle un breve aggiornamento mentre completiamo tutto con la massima attenzione.`;
   }
 
   if (stage === 1) {
@@ -558,19 +470,27 @@ Ti aggiorno velocemente: la valutazione è quasi pronta.
 Così mi regolo meglio, preferisci che ti scriva appena è tutto definito?`;
     }
 
-    if (ageGroup === "senior") {
-      return `Buongiorno ${name},
-
-volevo informarla che la valutazione è quasi pronta.
-
-Così posso organizzarmi al meglio, preferisce che le scriva non appena sarà tutto definito?`;
-    }
-
-    return `Ciao ${name} 👋
+    if (ageGroup === "adult") {
+      return `Ciao ${name} 👋
 
 Ti aggiorno rapidamente: la valutazione è quasi pronta.
 
 Così posso regolarmi meglio, preferisci che ti aggiorni appena è tutto definito?`;
+    }
+
+    if (ageGroup === "mature") {
+      return `Buongiorno ${name},
+
+volevo aggiornarla che la valutazione è quasi completata.
+
+Così posso organizzarmi al meglio, preferisce che le scriva appena sarà tutto pronto?`;
+    }
+
+    return `Buongiorno ${name},
+
+volevo informarla che la valutazione è quasi completata.
+
+Così posso organizzarmi al meglio, preferisce che le scriva non appena sarà tutto pronto?`;
   }
 
   if (ageGroup === "young_adult") {
@@ -581,7 +501,15 @@ Il piano è pronto.
 Quando ti è più comodo fare una videocall così te lo spiego bene?`;
   }
 
-  if (ageGroup === "senior") {
+  if (ageGroup === "adult") {
+    return `Ciao ${name} 👋
+
+Il piano è pronto.
+
+Posso chiederti quando sei disponibile per una videocall così te lo spiego bene?`;
+  }
+
+  if (ageGroup === "mature") {
     return `Buongiorno ${name},
 
 il piano è pronto.
@@ -589,11 +517,11 @@ il piano è pronto.
 Posso chiederle quando le sarebbe più comodo fare una videocall così posso spiegarle tutto con chiarezza?`;
   }
 
-  return `Ciao ${name} 👋
+  return `Buongiorno ${name},
 
-Il piano è pronto.
+il piano è pronto.
 
-Posso chiederti quando sei disponibile per una videocall così te lo spiego bene?`;
+Posso chiederle quando sarebbe disponibile per una videocall così da spiegarle tutto con calma e chiarezza?`;
 }
 
 async function generatePatientMessage(patient) {
