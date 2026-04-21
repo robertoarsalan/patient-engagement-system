@@ -1,221 +1,110 @@
-const { checkNewPatients } = require("../services/triggerService");
 const {
   getSheetData,
+  getSettings,
+  updateRow,
   isDue,
   hasValue,
-  toBool,
   findHeader,
-  updateRow,
-  formatDate,
-  resetPatientsSheetIfThresholdReached
+  formatDate
 } = require("../services/sheetService");
-const { generatePatientMessage } = require("../services/aiService");
-const { sendPatientTaskCard, sendTelegramMessage } = require("../services/telegramService");
-const {
-  notifyError,
-  markPollingSuccess,
-  markPollingError
-} = require("../services/supervisorService");
 
-let isRunning = false;
+const { sendTelegramMessage } = require("../services/telegramService");
 
 function getLast4(phone) {
-  const digits = String(phone || "").replace(/\D/g, "");
-  return digits.slice(-4) || "----";
+  const clean = String(phone || "").replace(/\D/g, "");
+  return clean.slice(-4) || "----";
 }
 
-async function checkCallReminders() {
-  const { headers, patients } = await getSheetData();
+async function handleCallReminders(headers, patients) {
+  const callTimeKey = findHeader(headers, "call_reminder_at");
+  const callActiveKey = findHeader(headers, "call_reminder_active");
 
-  const callReminderAtKey = findHeader(headers, "call_reminder_at");
-  const callReminderActiveKey = findHeader(headers, "call_reminder_active");
-  const callPendingInputKey = findHeader(headers, "call_pending_input");
-  const updatedAtKey = findHeader(headers, "updated_at");
-
-  if (!callReminderAtKey || !callReminderActiveKey) {
-    return;
-  }
-
-  for (const patient of patients) {
-    const active = toBool(patient[callReminderActiveKey]);
-    const reminderAt = patient[callReminderAtKey];
-
-    if (!active) continue;
-    if (!hasValue(reminderAt)) continue;
-    if (!isDue(reminderAt)) continue;
-
+  for (const p of patients) {
     try {
-      await sendTelegramMessage(
-        `📞 Call reminder
+      if (!toBool(p[callActiveKey])) continue;
+      if (!hasValue(p[callTimeKey])) continue;
 
-👤 Patient: ${patient.full_name || ""}
-📱 Last 4 digits: ${getLast4(patient.phone)}
-⏰ Reminder time: ${reminderAt} (TR time)`
-      );
+      if (!isDue(p[callTimeKey])) continue;
 
-      await updateRow(patient.rowNumber, {
-        [callReminderActiveKey]: "FALSE",
-        [callPendingInputKey]: "FALSE",
-        [updatedAtKey]: formatDate(new Date())
+      const name = p.full_name || "Patient";
+      const last4 = getLast4(p.phone);
+
+      const message = `
+📞 Call reminder
+👤 ${name}
+📱 ${last4}
+⏰ ${p[callTimeKey]} (TR time)
+`;
+
+      await sendTelegramMessage(message);
+
+      // deactivate after sending
+      await updateRow(p.rowNumber, {
+        [callActiveKey]: "FALSE"
       });
 
-      console.log(`Call reminder sent for row ${patient.rowNumber}`);
-    } catch (error) {
-      console.error(
-        `Call reminder failed for row ${patient.rowNumber}:`,
-        error.response?.data || error.message || error
-      );
-      await notifyError("pollSheetJob.checkCallReminders", error);
+    } catch (err) {
+      console.error("Call reminder error:", err.message);
     }
   }
 }
 
-async function checkDueTasks() {
-  const { headers, patients } = await getSheetData();
-
-  const activeKey = findHeader(headers, "current_task_active");
-  const followupKey = findHeader(headers, "next_followup_at");
-  const alertKey = findHeader(headers, "telegram_last_alert_id");
-  const generatedKey = findHeader(headers, "last_generated_message");
-  const finalKey = findHeader(headers, "last_final_message");
-  const updatedAtKey = findHeader(headers, "updated_at");
-  const actionKey = findHeader(headers, "next_action");
-  const taskTypeKey = findHeader(headers, "current_task_type");
-
-  console.log("Checking sheet for due tasks...");
-
-  let dueCount = 0;
-
-  for (const patient of patients) {
-    const currentTaskActive = toBool(patient[activeKey]);
-    const nextFollowupAt = patient[followupKey];
-    const telegramLastAlertId = patient[alertKey];
-    const nextAction = String(patient[actionKey] || "").trim();
-    const taskType = String(patient[taskTypeKey] || "").trim();
-    const due = isDue(nextFollowupAt);
-
-    console.log("Due check:", {
-      rowNumber: patient.rowNumber,
-      patient_id: patient.patient_id || "",
-      full_name: patient.full_name || "",
-      currentTaskActive,
-      nextFollowupAt,
-      telegramLastAlertId,
-      nextAction,
-      taskType,
-      due
-    });
-
-    if (!currentTaskActive) continue;
-    if (!hasValue(nextFollowupAt)) continue;
-    if (!due) continue;
-    if (nextAction !== "wait_patient_reply") continue;
-
-    // VERY IMPORTANT:
-    // if an alert ID already exists, it means reminder was already sent.
-    // Do NOT resend again every cycle.
-    if (hasValue(telegramLastAlertId)) continue;
-
-    dueCount++;
-
-    console.log(`Due follow-up found for row ${patient.rowNumber} (${patient.patient_id || ""})`);
-
-    try {
-      const aiResult = await generatePatientMessage({
-        ...patient,
-        [taskTypeKey]: "follow_up"
-      });
-
-      await updateRow(patient.rowNumber, {
-        [generatedKey]: aiResult.generatedMessage,
-        [finalKey]: aiResult.finalMessage,
-        [updatedAtKey]: formatDate(new Date())
-      });
-
-      const telegramMessage = await sendPatientTaskCard(
-        patient.rowNumber,
-        {
-          ...patient,
-          [generatedKey]: aiResult.generatedMessage,
-          [finalKey]: aiResult.finalMessage,
-          [taskTypeKey]: "follow_up"
-        },
-        aiResult.finalMessage
-      );
-
-      await updateRow(patient.rowNumber, {
-        [alertKey]: String(telegramMessage.message_id || ""),
-        [updatedAtKey]: formatDate(new Date())
-      });
-
-      console.log(`Follow-up Telegram task sent for row ${patient.rowNumber}`);
-    } catch (error) {
-      console.error(
-        `Failed due follow-up for row ${patient.rowNumber}:`,
-        error.response?.data || error.message || error
-      );
-      await notifyError("pollSheetJob.checkDueTasks", error);
-    }
-  }
-
-  if (dueCount === 0) {
-    console.log("No due tasks right now.");
-  }
+function toBool(value) {
+  const v = String(value || "").toLowerCase();
+  return v === "true" || v === "1";
 }
 
 async function runPollingCycle() {
-  if (isRunning) return;
-  isRunning = true;
-
   try {
-    const resetResult = await resetPatientsSheetIfThresholdReached();
+    const { headers, patients } = await getSheetData();
+    const settings = await getSettings();
 
-    if (resetResult.triggered) {
+    // 🔹 CALL REMINDER CHECK
+    await handleCallReminders(headers, patients);
+
+    // 🔹 NORMAL FOLLOW-UP SYSTEM CONTINUES HERE
+    for (const p of patients) {
       try {
-        await sendTelegramMessage(
-          `⚠️ Patients sheet reached ${resetResult.filledCount} names.
+        const followKey = findHeader(headers, "next_followup_at");
+        const activeKey = findHeader(headers, "current_task_active");
 
-🧹 Resetting patient rows now.
-✅ Headers, formulas, settings, and logs are preserved.`
-        );
-      } catch (error) {
-        console.error(
-          "Failed to send pre-reset notification:",
-          error.response?.data || error.message || error
-        );
-        await notifyError("pollSheetJob.preResetNotification", error);
+        if (!toBool(p[activeKey])) continue;
+        if (!hasValue(p[followKey])) continue;
+
+        if (!isDue(p[followKey])) continue;
+
+        // ⚠️ IMPORTANT: prevent double-fire
+        const lastAlertKey = findHeader(headers, "telegram_last_alert_id");
+
+        if (hasValue(p[lastAlertKey])) continue;
+
+        const message = `
+📌 Patient Follow-up
+👤 ${p.full_name}
+⏰ ${p[followKey]} (TR time)
+`;
+
+        const msgId = await sendTelegramMessage(message);
+
+        await updateRow(p.rowNumber, {
+          [lastAlertKey]: String(msgId)
+        });
+
+      } catch (err) {
+        console.error("Follow-up error:", err.message);
       }
-
-      console.log(`Patients sheet auto-reset completed at threshold ${resetResult.filledCount}.`);
-      markPollingSuccess();
-      return;
     }
 
-    await checkNewPatients();
-    await checkCallReminders();
-    await checkDueTasks();
-
-    markPollingSuccess();
-  } catch (error) {
-    console.error("Polling cycle error:", error.message || error);
-    markPollingError(error);
-    await notifyError("pollSheetJob.runPollingCycle", error);
-  } finally {
-    isRunning = false;
+  } catch (err) {
+    console.error("Polling cycle error:", err.message);
   }
 }
 
-function startPollSheetJob() {
-  runPollingCycle();
-
-  setInterval(async () => {
-    await runPollingCycle();
-  }, 10000);
+function startPolling() {
+  console.log("🚀 Polling started...");
+  setInterval(runPollingCycle, 5000); // every 5 seconds
 }
 
 module.exports = {
-  startPollSheetJob,
-  runPollingCycle,
-  checkDueTasks,
-  checkCallReminders
+  startPolling
 };
