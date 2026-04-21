@@ -95,10 +95,9 @@ function hasValue(v) {
 function parseSheetDateTime(datetime) {
   if (!datetime) return null;
 
-  const raw = String(datetime).trim();
+  const raw = String(datetime).replace(/^'/, "").trim();
   if (!raw) return null;
 
-  // 1) YYYY-MM-DD HH:mm:ss or YYYY-MM-DDTHH:mm:ss
   let match = raw.match(
     /^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?$/
   );
@@ -111,11 +110,9 @@ function parseSheetDateTime(datetime) {
     const minute = Number(match[5]);
     const second = Number(match[6] || 0);
 
-    // Istanbul = UTC+3
     return new Date(Date.UTC(year, month - 1, day, hour - 3, minute, second));
   }
 
-  // 2) M/D/YYYY H:mm:ss or MM/DD/YYYY HH:mm:ss
   match = raw.match(
     /^(\d{1,2})\/(\d{1,2})\/(\d{4})[ ,T]+(\d{1,2}):(\d{2})(?::(\d{2}))?$/
   );
@@ -128,11 +125,9 @@ function parseSheetDateTime(datetime) {
     const minute = Number(match[5]);
     const second = Number(match[6] || 0);
 
-    // Istanbul = UTC+3
     return new Date(Date.UTC(year, month - 1, day, hour - 3, minute, second));
   }
 
-  // 3) Final fallback
   const fallback = new Date(raw);
   if (!Number.isNaN(fallback.getTime())) {
     return fallback;
@@ -172,6 +167,7 @@ function isDateHeader(header) {
     "created_at",
     "updated_at",
     "call_reminder_at",
+    "workflow_started_at",
     "workflow_started_at"
   ].includes(header);
 }
@@ -181,7 +177,6 @@ function prepareCellValue(header, value) {
   if (value === null) return "";
 
   if (isDateHeader(header) && String(value).trim() !== "") {
-    // force plain text so Sheets doesn't auto-reformat to locale unexpectedly
     return `'${String(value).trim()}`;
   }
 
@@ -334,7 +329,7 @@ async function appendStatusHistory(data) {
 
 function getMixedReminderPlan(counter, settings, firstSentTime, currentSendTime) {
   const r1 = Number(settings.reminder_1_minutes || 60);
-  const r2 = Number(settings.reminder_2_minutes || 120);
+  const r2 = Number(settings.reminder_2_minutes || 210); // 1h + 2.5h after second notification flow target
   const r3 = Number(settings.reminder_3_minutes || 150);
 
   if (counter === 1) {
@@ -346,8 +341,8 @@ function getMixedReminderPlan(counter, settings, firstSentTime, currentSendTime)
 
   if (counter === 2) {
     return {
-      minutes: r2,
-      nextDate: addMinutes(firstSentTime, r2)
+      minutes: r3,
+      nextDate: addMinutes(currentSendTime, r3)
     };
   }
 
@@ -371,6 +366,7 @@ async function markSent(patient, headers, settings, finalMessage) {
   const countKey = findHeader(headers, "message_count");
   const alertKey = findHeader(headers, "telegram_last_alert_id");
   const updatedAtKey = findHeader(headers, "updated_at");
+  const workflowStartedAtKey = findHeader(headers, "workflow_started_at");
 
   const oldStatus = patient[statusKey] || "";
   const oldSubStatus = patient[subKey] || "";
@@ -379,8 +375,9 @@ async function markSent(patient, headers, settings, finalMessage) {
   const stalled = Number(patient[stalledKey] || 0) + 1;
 
   const currentSendTime = new Date();
-  const firstSentTime = patient[lastAgentKey]
-    ? parseSheetDateTime(patient[lastAgentKey]) || currentSendTime
+
+  const firstSentTime = patient[workflowStartedAtKey]
+    ? parseSheetDateTime(patient[workflowStartedAtKey]) || currentSendTime
     : currentSendTime;
 
   const plan = getMixedReminderPlan(
@@ -397,7 +394,8 @@ async function markSent(patient, headers, settings, finalMessage) {
     [activeKey]: "TRUE",
     [actionKey]: "wait_patient_reply",
     [followKey]: formatDate(plan.nextDate),
-    [lastAgentKey]: patient[lastAgentKey] || formatDate(firstSentTime),
+    [lastAgentKey]: formatDate(currentSendTime),
+    [workflowStartedAtKey]: patient[workflowStartedAtKey] || formatDate(currentSendTime),
     [generatedKey]: patient[generatedKey] || "",
     [finalKey]: finalMessage,
     [stalledKey]: String(stalled),
