@@ -92,35 +92,53 @@ function hasValue(v) {
   return String(v || "").trim() !== "";
 }
 
-function now() {
-  return new Date();
-}
-
 function parseSheetDateTime(datetime) {
   if (!datetime) return null;
 
   const raw = String(datetime).trim();
   if (!raw) return null;
 
-  const match = raw.match(
-    /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})$/
+  // 1) YYYY-MM-DD HH:mm:ss or YYYY-MM-DDTHH:mm:ss
+  let match = raw.match(
+    /^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?$/
   );
 
-  if (!match) return null;
+  if (match) {
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const hour = Number(match[4]);
+    const minute = Number(match[5]);
+    const second = Number(match[6] || 0);
 
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  const hour = Number(match[4]);
-  const minute = Number(match[5]);
-  const second = Number(match[6]);
+    // Istanbul = UTC+3
+    return new Date(Date.UTC(year, month - 1, day, hour - 3, minute, second));
+  }
 
-  // Europe/Istanbul = UTC+3
-  const utcMillis = Date.UTC(year, month - 1, day, hour - 3, minute, second);
-  const parsed = new Date(utcMillis);
+  // 2) M/D/YYYY H:mm:ss or MM/DD/YYYY HH:mm:ss
+  match = raw.match(
+    /^(\d{1,2})\/(\d{1,2})\/(\d{4})[ ,T]+(\d{1,2}):(\d{2})(?::(\d{2}))?$/
+  );
 
-  if (Number.isNaN(parsed.getTime())) return null;
-  return parsed;
+  if (match) {
+    const month = Number(match[1]);
+    const day = Number(match[2]);
+    const year = Number(match[3]);
+    const hour = Number(match[4]);
+    const minute = Number(match[5]);
+    const second = Number(match[6] || 0);
+
+    // Istanbul = UTC+3
+    return new Date(Date.UTC(year, month - 1, day, hour - 3, minute, second));
+  }
+
+  // 3) Final fallback
+  const fallback = new Date(raw);
+  if (!Number.isNaN(fallback.getTime())) {
+    return fallback;
+  }
+
+  return null;
 }
 
 function isDue(datetime) {
@@ -141,6 +159,33 @@ function mapRows(headers, rows) {
 
 function findHeader(headers, key) {
   return headers.find((h) => h === key || h.startsWith(key));
+}
+
+function isDateHeader(header) {
+  return [
+    "next_followup_at",
+    "last_patient_reply_at",
+    "last_agent_message_at",
+    "photos_requested_at",
+    "photos_received_at",
+    "evaluation_sent_at",
+    "created_at",
+    "updated_at",
+    "call_reminder_at",
+    "workflow_started_at"
+  ].includes(header);
+}
+
+function prepareCellValue(header, value) {
+  if (value === undefined) return undefined;
+  if (value === null) return "";
+
+  if (isDateHeader(header) && String(value).trim() !== "") {
+    // force plain text so Sheets doesn't auto-reformat to locale unexpectedly
+    return `'${String(value).trim()}`;
+  }
+
+  return value;
 }
 
 async function getSheetData() {
@@ -207,8 +252,9 @@ async function updateRow(rowNumber, updates) {
 
   for (let i = 0; i < headers.length; i++) {
     const header = headers[i];
+
     if (updates[header] !== undefined) {
-      mergedRow[i] = updates[header];
+      mergedRow[i] = prepareCellValue(header, updates[header]);
     } else {
       mergedRow[i] = currentRow[i] !== undefined ? currentRow[i] : "";
     }
@@ -323,7 +369,7 @@ async function markSent(patient, headers, settings, finalMessage) {
   const generatedKey = findHeader(headers, "last_generated_message");
   const stalledKey = findHeader(headers, "stalled_task_counter");
   const countKey = findHeader(headers, "message_count");
-  const alertKey = findHeader(headers, "telegram_last");
+  const alertKey = findHeader(headers, "telegram_last_alert_id");
   const updatedAtKey = findHeader(headers, "updated_at");
 
   const oldStatus = patient[statusKey] || "";

@@ -1,40 +1,25 @@
-const TIMEZONE = process.env.TIMEZONE || "Europe/Istanbul";
+function pad(value) {
+  return String(value).padStart(2, "0");
+}
 
 function formatDate(date) {
-  const formatter = new Intl.DateTimeFormat("en-GB", {
-    timeZone: TIMEZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false
-  });
+  const d = new Date(date);
 
-  const parts = formatter.formatToParts(date);
-  const map = {};
+  const year = d.getFullYear();
+  const month = pad(d.getMonth() + 1);
+  const day = pad(d.getDate());
+  const hours = pad(d.getHours());
+  const minutes = pad(d.getMinutes());
+  const seconds = pad(d.getSeconds());
 
-  for (const part of parts) {
-    if (part.type !== "literal") {
-      map[part.type] = part.value;
-    }
-  }
-
-  return `${map.year}-${map.month}-${map.day} ${map.hour}:${map.minute}:${map.second}`;
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
 }
 
 function addMinutes(date, minutes) {
-  return new Date(date.getTime() + minutes * 60000);
-}
-
-function addHours(date, hours) {
-  return addMinutes(date, hours * 60);
+  return new Date(new Date(date).getTime() + Number(minutes || 0) * 60000);
 }
 
 module.exports = {
-  TIMEZONE,
   formatDate,
-  addMinutes,
-  addHours
+  addMinutes
 };
