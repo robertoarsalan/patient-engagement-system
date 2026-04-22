@@ -2,10 +2,13 @@ const state = {
   lastPollingSuccessAt: null,
   lastPollingErrorAt: null,
   lastPollingErrorMessage: "",
+
   lastTelegramSuccessAt: null,
   lastSheetsSuccessAt: null,
   lastAiSuccessAt: null,
+
   alertsSent: new Map(),
+
   counters: {
     newPatientsToday: 0,
     messagesMarkedSentToday: 0,
@@ -13,7 +16,9 @@ const state = {
     callRemindersTriggeredToday: 0,
     errorsToday: 0
   },
-  lastDailySummaryDate: null
+
+  lastDailySummaryDate: null,
+  lastSummarySentKey: null
 };
 
 function getTurkeyNow() {
@@ -39,6 +44,15 @@ function getTurkeyTimestampLabel() {
   });
 }
 
+function formatTimestamp(ts) {
+  if (!ts) return "never";
+
+  return new Date(ts).toLocaleString("en-GB", {
+    timeZone: process.env.TIMEZONE || "Europe/Istanbul",
+    hour12: false
+  }) + " (TR time)";
+}
+
 function resetDailyCountersIfNeeded() {
   const today = getTurkeyDateKey();
 
@@ -61,9 +75,11 @@ function resetDailyCountersIfNeeded() {
 
 function incrementCounter(counterName) {
   resetDailyCountersIfNeeded();
+
   if (typeof state.counters[counterName] !== "number") {
     state.counters[counterName] = 0;
   }
+
   state.counters[counterName] += 1;
 }
 
@@ -256,20 +272,30 @@ function recordCallReminderTriggered() {
   incrementCounter("callRemindersTriggeredToday");
 }
 
-async function sendDailySummaryIfNeeded() {
+async function sendScheduledSummaryIfNeeded() {
   resetDailyCountersIfNeeded();
 
   const now = getTurkeyNow();
-  const currentHour = now.getHours();
-  const currentMinute = now.getMinutes();
-  const todayKey = getTurkeyDateKey();
-  const summaryKey = `daily-summary-${todayKey}`;
+  const hour = now.getHours();
+  const minute = now.getMinutes();
 
-  if (currentHour !== 21 || currentMinute > 10) return;
-  if (shouldThrottle("daily-summary", summaryKey, 20 * 60 * 60 * 1000)) return;
+  let slot = null;
+  if (hour === 7 && minute === 0) slot = "07:00";
+  if (hour === 15 && minute === 0) slot = "15:00";
+
+  if (!slot) return;
+
+  const todayKey = getTurkeyDateKey();
+  const summaryKey = `${todayKey}-${slot}`;
+
+  if (state.lastSummarySentKey === summaryKey) {
+    return;
+  }
+
+  state.lastSummarySentKey = summaryKey;
 
   await notifySupervisor(
-    "Daily system summary",
+    `Scheduled supervisor summary (${slot})`,
     `📊 Date: ${todayKey}
 
 🆕 New patients: ${state.counters.newPatientsToday}
@@ -278,38 +304,10 @@ async function sendDailySummaryIfNeeded() {
 📞 Call reminders triggered: ${state.counters.callRemindersTriggeredToday}
 ❌ Errors today: ${state.counters.errorsToday}
 
-✅ Last polling success: ${
-      state.lastPollingSuccessAt
-        ? new Date(state.lastPollingSuccessAt).toLocaleString("en-GB", {
-            timeZone: process.env.TIMEZONE || "Europe/Istanbul",
-            hour12: false
-          }) + " (TR time)"
-        : "never"
-    }
-✅ Last Telegram success: ${
-      state.lastTelegramSuccessAt
-        ? new Date(state.lastTelegramSuccessAt).toLocaleString("en-GB", {
-            timeZone: process.env.TIMEZONE || "Europe/Istanbul",
-            hour12: false
-          }) + " (TR time)"
-        : "never"
-    }
-✅ Last Sheets success: ${
-      state.lastSheetsSuccessAt
-        ? new Date(state.lastSheetsSuccessAt).toLocaleString("en-GB", {
-            timeZone: process.env.TIMEZONE || "Europe/Istanbul",
-            hour12: false
-          }) + " (TR time)"
-        : "never"
-    }
-✅ Last AI success: ${
-      state.lastAiSuccessAt
-        ? new Date(state.lastAiSuccessAt).toLocaleString("en-GB", {
-            timeZone: process.env.TIMEZONE || "Europe/Istanbul",
-            hour12: false
-          }) + " (TR time)"
-        : "never"
-    }`
+✅ Last polling success: ${formatTimestamp(state.lastPollingSuccessAt)}
+✅ Last Telegram success: ${formatTimestamp(state.lastTelegramSuccessAt)}
+✅ Last Sheets success: ${formatTimestamp(state.lastSheetsSuccessAt)}
+✅ Last AI success: ${formatTimestamp(state.lastAiSuccessAt)}`
   );
 }
 
@@ -346,7 +344,7 @@ Check Railway environment variables and redeploy if needed.`
       if (diffMin >= 5) {
         const detail = `Polling has not completed successfully for ${diffMin} minute(s). Last error: ${state.lastPollingErrorMessage || "unknown"}`;
 
-        if (!shouldThrottle("polling-stale", detail, 30 * 60 * 1000)) {
+        if (!shouldThrottle("polling-stale", detail, 6 * 60 * 60 * 1000)) {
           await notifySupervisor(
             "Polling appears stalled",
             `⏳ No successful polling cycle for ${diffMin} minute(s)
@@ -361,24 +359,7 @@ Check Railway logs and the latest scheduler-related errors.`
       }
     }
 
-    if (state.lastTelegramSuccessAt) {
-      const diffMin = Math.floor((Date.now() - state.lastTelegramSuccessAt) / 60000);
-
-      if (diffMin >= 30) {
-        const detail = `Telegram success missing for ${diffMin} minute(s)`;
-        if (!shouldThrottle("telegram-stale", detail, 60 * 60 * 1000)) {
-          await notifySupervisor(
-            "Telegram channel may be unhealthy",
-            `📭 No successful Telegram send recorded for ${diffMin} minute(s)
-
-🛠 Suggested action:
-Verify bot token, chat id, and send a manual test through the system.`
-          );
-        }
-      }
-    }
-
-    await sendDailySummaryIfNeeded();
+    await sendScheduledSummaryIfNeeded();
   } catch (error) {
     console.error("Supervisor self-check failed:", error.message || error);
   }
