@@ -9,6 +9,8 @@ const state = {
 
   alertsSent: new Map(),
 
+  pollingStallAlertSentAt: null,
+
   counters: {
     newPatientsToday: 0,
     messagesMarkedSentToday: 0,
@@ -20,6 +22,9 @@ const state = {
   lastDailySummaryDate: null,
   lastSummarySentKey: null
 };
+
+const POLLING_STALL_THRESHOLD_MINUTES = 20;
+const POLLING_STALL_ALERT_COOLDOWN_MS = 60 * 60 * 1000;
 
 function getTurkeyNow() {
   return new Date(
@@ -47,10 +52,12 @@ function getTurkeyTimestampLabel() {
 function formatTimestamp(ts) {
   if (!ts) return "never";
 
-  return new Date(ts).toLocaleString("en-GB", {
-    timeZone: process.env.TIMEZONE || "Europe/Istanbul",
-    hour12: false
-  }) + " (TR time)";
+  return (
+    new Date(ts).toLocaleString("en-GB", {
+      timeZone: process.env.TIMEZONE || "Europe/Istanbul",
+      hour12: false
+    }) + " (TR time)"
+  );
 }
 
 function resetDailyCountersIfNeeded() {
@@ -70,6 +77,7 @@ function resetDailyCountersIfNeeded() {
       errorsToday: 0
     };
     state.lastDailySummaryDate = today;
+    state.lastSummarySentKey = null;
   }
 }
 
@@ -237,6 +245,9 @@ ${suggestedAction}`
 
 function markPollingSuccess() {
   state.lastPollingSuccessAt = Date.now();
+
+  // Reset emergency polling-stall lock only after polling becomes healthy again.
+  state.pollingStallAlertSentAt = null;
 }
 
 function markPollingError(error) {
@@ -311,6 +322,36 @@ async function sendScheduledSummaryIfNeeded() {
   );
 }
 
+async function checkPollingStallIfNeeded() {
+  if (!state.lastPollingSuccessAt) return;
+
+  const diffMs = Date.now() - state.lastPollingSuccessAt;
+  const diffMin = Math.floor(diffMs / 60000);
+
+  if (diffMin < POLLING_STALL_THRESHOLD_MINUTES) {
+    return;
+  }
+
+  const lastAlertAt = state.pollingStallAlertSentAt;
+
+  if (lastAlertAt && Date.now() - lastAlertAt < POLLING_STALL_ALERT_COOLDOWN_MS) {
+    return;
+  }
+
+  state.pollingStallAlertSentAt = Date.now();
+
+  await notifySupervisor(
+    "Polling appears stalled",
+    `⏳ No successful polling cycle for ${diffMin} minute(s)
+
+🧩 Last polling error:
+${state.lastPollingErrorMessage || "unknown"}
+
+🛠 Suggested action:
+Check Railway logs and the latest scheduler-related errors.`
+  );
+}
+
 async function runSelfCheck() {
   try {
     resetDailyCountersIfNeeded();
@@ -337,28 +378,7 @@ Check Railway environment variables and redeploy if needed.`
       }
     }
 
-    if (state.lastPollingSuccessAt) {
-      const diffMs = Date.now() - state.lastPollingSuccessAt;
-      const diffMin = Math.floor(diffMs / 60000);
-
-      if (diffMin >= 5) {
-        const detail = `Polling has not completed successfully for ${diffMin} minute(s). Last error: ${state.lastPollingErrorMessage || "unknown"}`;
-
-        if (!shouldThrottle("polling-stale", detail, 6 * 60 * 60 * 1000)) {
-          await notifySupervisor(
-            "Polling appears stalled",
-            `⏳ No successful polling cycle for ${diffMin} minute(s)
-
-🧩 Last polling error:
-${state.lastPollingErrorMessage || "unknown"}
-
-🛠 Suggested action:
-Check Railway logs and the latest scheduler-related errors.`
-          );
-        }
-      }
-    }
-
+    await checkPollingStallIfNeeded();
     await sendScheduledSummaryIfNeeded();
   } catch (error) {
     console.error("Supervisor self-check failed:", error.message || error);
