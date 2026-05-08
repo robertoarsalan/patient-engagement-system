@@ -54,6 +54,21 @@ function getTurkeyNowDate() {
   };
 }
 
+function isValidDateParts(year, month, day, hour, minute) {
+  if (!Number.isInteger(year) || year < 2024 || year > 2100) return false;
+  if (!Number.isInteger(month) || month < 1 || month > 12) return false;
+  if (!Number.isInteger(day) || day < 1 || day > 31) return false;
+  if (!Number.isInteger(hour) || hour < 0 || hour > 23) return false;
+  if (!Number.isInteger(minute) || minute < 0 || minute > 59) return false;
+
+  const test = new Date(Date.UTC(year, month - 1, day, hour, minute, 0));
+  return (
+    test.getUTCFullYear() === year &&
+    test.getUTCMonth() === month - 1 &&
+    test.getUTCDate() === day
+  );
+}
+
 function buildTurkeyDate(year, month, day, hour, minute, second = 0) {
   return new Date(Date.UTC(year, month - 1, day, hour - 3, minute, second));
 }
@@ -61,39 +76,55 @@ function buildTurkeyDate(year, month, day, hour, minute, second = 0) {
 function parseCallReminderInput(text) {
   const raw = String(text || "").trim();
 
-  let full = raw.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})$/);
-  if (full) {
-    const year = Number(full[1]);
-    const month = Number(full[2]);
-    const day = Number(full[3]);
-    const hour = Number(full[4]);
-    const minute = Number(full[5]);
+  // Accepted:
+  // HH:mm
+  // YYYY-MM-DD HH:mm
+  // YYYY/MM/DD HH:mm
+  // DD-MM-YYYY HH:mm
+  // DD/MM/YYYY HH:mm
+
+  let match = raw.match(/^(\d{1,2}):(\d{2})$/);
+  if (match) {
+    const trNow = getTurkeyNowDate();
+    const hour = Number(match[1]);
+    const minute = Number(match[2]);
+
+    if (!isValidDateParts(trNow.year, trNow.month, trNow.day, hour, minute)) {
+      return null;
+    }
+
+    // Time only = same day in Turkey time
+    return buildTurkeyDate(trNow.year, trNow.month, trNow.day, hour, minute, 0);
+  }
+
+  match = raw.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})\s+(\d{1,2}):(\d{2})$/);
+  if (match) {
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const hour = Number(match[4]);
+    const minute = Number(match[5]);
+
+    if (!isValidDateParts(year, month, day, hour, minute)) {
+      return null;
+    }
+
     return buildTurkeyDate(year, month, day, hour, minute, 0);
   }
 
-  const short = raw.match(/^(\d{2}):(\d{2})$/);
-  if (short) {
-    const trNow = getTurkeyNowDate();
-    const hour = Number(short[1]);
-    const minute = Number(short[2]);
+  match = raw.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})\s+(\d{1,2}):(\d{2})$/);
+  if (match) {
+    const day = Number(match[1]);
+    const month = Number(match[2]);
+    const year = Number(match[3]);
+    const hour = Number(match[4]);
+    const minute = Number(match[5]);
 
-    let reminderDate = buildTurkeyDate(
-      trNow.year,
-      trNow.month,
-      trNow.day,
-      hour,
-      minute,
-      0
-    );
-
-    const nowUtc = new Date();
-    if (reminderDate.getTime() <= nowUtc.getTime()) {
-      reminderDate = new Date(
-        Date.UTC(trNow.year, trNow.month - 1, trNow.day + 1, hour - 3, minute, 0)
-      );
+    if (!isValidDateParts(year, month, day, hour, minute)) {
+      return null;
     }
 
-    return reminderDate;
+    return buildTurkeyDate(year, month, day, hour, minute, 0);
   }
 
   return null;
@@ -286,7 +317,11 @@ app.post("/telegram-webhook", async (req, res) => {
 Send:
 HH:mm
 or
-YYYY-MM-DD HH:mm`
+YYYY-MM-DD HH:mm
+or
+YYYY/MM/DD HH:mm
+or
+DD/MM/YYYY HH:mm`
           );
 
           return res.json({ ok: true });
@@ -452,7 +487,9 @@ YYYY-MM-DD HH:mm`
         const parsed = parseCallReminderInput(messageText);
 
         if (!parsed) {
-          await sendTelegramMessage("❌ Invalid time. Use HH:mm or YYYY-MM-DD HH:mm");
+          await sendTelegramMessage(
+            "❌ Invalid time. Use HH:mm, YYYY-MM-DD HH:mm, YYYY/MM/DD HH:mm, or DD/MM/YYYY HH:mm"
+          );
           return res.json({ ok: true });
         }
 
